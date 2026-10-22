@@ -223,6 +223,47 @@ A failed `ingestStatementJob` reads the file again from the path it was launched
 5. `run_recon.sh` exit codes tell the same story without reading files: 7 duplicate, 8 rejected, 5 a job failed (the log shows the restart command), 6 the job did not finish in time (it is still running; poll the execution), 9 the run completed but has more breaks than allowed.
 6. `AtomicMoveNotSupportedException` in the log means the inbox and the archive or failed folder are on different file systems; keep `data/` on one volume.
 
+## Performance
+
+Measured on 2026-10-23 with `scripts/benchmark.sh`, which for every chunk size starts the application with that `RECON_CHUNK_SIZE`, then for every repetition and row count generates a fresh data set, ingests it through the API and reconciles it once per grid size (re-runs of the same file), and records every job's own duration from `GET /api/v1/jobs/executions/{id}`:
+
+```bash
+docker compose down -v && docker compose up -d --wait
+./mvnw -DskipTests package
+RECON_API_PASSWORD=operator-dev scripts/benchmark.sh      # defaults: -n 100000,1000000 -c 100,500,2000 -g 1,2,4 -r 2
+```
+
+Machine: Intel Core i5-13500H (12 cores, 4 performance and 8 efficiency, 16 hardware threads), 15.3 GiB RAM, NVMe SSD (WD PC SN740), Linux 6.8, OpenJDK 21.0.12.1, PostgreSQL 16.15 running in Docker from this repository's `docker-compose.yml` (`postgres:16-alpine`, default server settings; the application sets `work_mem` to 64MB per session). The desktop was in use (browser, IDE) but no other build ran during the measurement; load average 1.68 at the start. The whole matrix took 12 minutes. A 1,000,000-row data set is an 81 MB file with about 1,019,000 data records, of which about 9,000 are malformed and skipped (the benchmark raises the skip limit to 2% of the row count). Every run found exactly the number of breaks its manifest predicted.
+
+Job durations in seconds, both repetitions (`first / second`). The first job of each kind after an application start includes JIT warm-up, which is why most 100,000-row pairs differ by more than 20%; at 1,000,000 rows only the chunk 2000, grid 2 pair differs by more than 20%.
+
+| Ingest, chunk size | 100,000 rows | 1,000,000 rows | commits per 1,000,000 lines |
+|---|---|---|---|
+| 100 | 4.06 / 2.93 | 27.72 / 28.10 | 10,190 |
+| 500 | 3.97 / 2.67 | 27.31 / 24.80 | 2,039 |
+| 2000 | 3.58 / 2.39 | 24.62 / 21.51 | 510 |
+
+| Reconcile, chunk size | grid size | 100,000 rows | 1,000,000 rows |
+|---|---|---|---|
+| 100 | 1 | 3.76 / 2.72 | 30.61 / 29.06 |
+| 100 | 2 | 2.43 / 2.36 | 21.99 / 21.86 |
+| 100 | 4 | 1.52 / 1.62 | 16.39 / 15.74 |
+| 500 | 1 | 3.31 / 1.96 | 21.20 / 20.54 |
+| 500 | 2 | 2.41 / 1.63 | 16.72 / 16.23 |
+| 500 | 4 | 1.92 / 1.66 | 10.60 / 10.73 |
+| 2000 | 1 | 3.02 / 1.84 | 27.05 / 24.01 |
+| 2000 | 2 | 1.39 / 1.52 | 15.74 / 13.01 |
+| 2000 | 4 | 1.18 / 0.96 | 11.50 / 9.73 |
+
+What the numbers say:
+
+- Four partitions reconcile 1,000,000 rows about twice as fast as one (chunk 500: 10.6 s against 20.5 s). Each partition holds two connections; the Hikari gauges peaked at 8 active connections with none pending during a grid-4 run, so the default pool of 10 is enough up to grid size 4 and `DB_POOL_SIZE` must be at least `2 * RECON_GRID_SIZE + 2` beyond that (checked at start-up).
+- Larger chunks help the ingest (fewer commits) and the partitioned reconcile, but chunk 2000 with a single partition was slower than chunk 500 in both repetitions; the cause was not investigated.
+- `EXPLAIN (ANALYZE, BUFFERS)` of the pairing query on a 1,000,000-line file: the whole query (no partition predicate) runs in 5.1 to 6.0 s and sorts about 200 MB on disk; one of four partitions runs in 2.9 to 3.7 s at the server default `work_mem` of 4MB and in 1.6 s at 64MB, where its sorts and hash table stay in memory. Expression indexes on the normalised reference (statement side, ledger side, both) changed the plan but not the time, so none was added. Driver-side `reWriteBatchedInserts` halved the generator's 1,000,000-row insert (21.0 and 23.3 s to 10.5 and 12.5 s) and cut the ingest from 34.8 s to 25.3 s (one run each, chunk 500).
+- Memory stays flat. With `JAVA_OPTS=-Xmx256m` the application generated, ingested (19.3 s) and reconciled (grid 4, 12.5 s) a 1,000,000-row data set without an `OutOfMemoryError`: 310 young collections, no full collection, at most 77 MB of live heap after a collection, 248 MB committed, and a peak resident set of 520 MB for the whole JVM (`VmHWM`). The generator ran with the same heap and peaked at 41 MB live.
+
+Results are written as CSV to `data/benchmark/` (ignored by git), one row per job with the step counts the application reported, so every number above can be traced to a job execution.
+
 ## Testing
 
 ```bash
