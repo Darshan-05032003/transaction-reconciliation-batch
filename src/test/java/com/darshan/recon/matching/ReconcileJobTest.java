@@ -102,9 +102,9 @@ class ReconcileJobTest {
         assertThat(execution.getExitStatus().getExitCode()).isEqualTo(ExitStatus.COMPLETED.getExitCode());
         assertThat(execution.getStepExecutions()).extracting(StepExecution::getStepName)
                 .startsWith(ReconcileJobKeys.CREATE_RUN_STEP)
-                .endsWith(ReconcileJobKeys.FINALISE_STEP)
+                .endsWith(ReconcileJobKeys.FINALISE_STEP, ReconcileJobKeys.REPORT_STEP, ReconcileJobKeys.SUMMARY_STEP)
                 .contains(ReconcileJobKeys.MATCH_STEP)
-                .hasSize(3 + properties.gridSize());
+                .hasSize(5 + properties.gridSize());
         assertThat(partitionSteps(execution)).hasSize(properties.gridSize())
                 .allSatisfy(partition -> assertThat(partition.getStatus()).isEqualTo(BatchStatus.COMPLETED));
 

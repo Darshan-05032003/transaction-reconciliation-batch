@@ -53,6 +53,7 @@ public class ReconcileJobConfiguration {
 
     @Bean
     public Job reconcileJob(Step createReconRunStep, Step matchCandidatesStep, Step finaliseReconRunStep,
+                            Step writeBreakReportStep, Step writeRunSummaryStep,
                             ReconcileJobListener reconcileJobListener,
                             ReconcileJobParametersValidator reconcileJobParametersValidator) {
         return new JobBuilder(ReconcileJobKeys.JOB_NAME, jobRepository)
@@ -61,6 +62,8 @@ public class ReconcileJobConfiguration {
                 .start(createReconRunStep)
                 .next(matchCandidatesStep)
                 .next(finaliseReconRunStep)
+                .next(writeBreakReportStep)
+                .next(writeRunSummaryStep)
                 .build();
     }
 

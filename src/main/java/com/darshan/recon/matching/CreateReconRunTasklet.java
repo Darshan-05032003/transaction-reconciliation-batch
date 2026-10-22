@@ -46,6 +46,7 @@ public class CreateReconRunTasklet implements Tasklet {
         ExecutionContext jobContext = jobExecution.getExecutionContext();
         jobContext.putLong(ReconcileJobKeys.RECON_RUN_ID, reconRunId);
         jobContext.putString(ReconcileJobKeys.ACCOUNT_NUMBER, file.accountNumber());
+        jobContext.putString(ReconcileJobKeys.STATEMENT_DATE, file.statementDate().toString());
         jobContext.putString(ReconcileJobKeys.WINDOW_FROM, window.from().toString());
         jobContext.putString(ReconcileJobKeys.WINDOW_TO, window.to().toString());
         log.info("Started recon_run {} for statement_file {} ({}, account ending {}, ledger window {}..{})",
