@@ -47,6 +47,9 @@ class JobApiTest extends ApiTestBase {
                 .hasPathSatisfying("$.steps[2].commitCount", c -> c.assertThat().asNumber().satisfies(n -> assertThat(n.longValue()).isGreaterThanOrEqualTo(1)))
                 .hasPathSatisfying("$.steps[2].rollbackCount", r -> r.assertThat().isEqualTo(0));
         long fileId = jdbcTemplate.queryForObject("select id from statement_file", Long.class);
+        assertThat(ingestExecution).bodyJson()
+                .hasPathSatisfying("$.statementFileId", f -> number(f.assertThat(), String.valueOf(fileId)))
+                .hasPathSatisfying("$.reconRunId", r -> r.assertThat().isNull());
 
         MvcTestResult reconcileLaunched = mvc.post().uri("/api/v1/jobs/reconcile/{id}", fileId)
                 .with(as(OPERATOR)).exchange();
@@ -59,6 +62,9 @@ class JobApiTest extends ApiTestBase {
                 .hasPathSatisfying("$.steps[*].name", names -> names.assertThat().asArray()
                         .contains("createReconRun", "matchCandidates", "finaliseReconRun", "writeBreakReport", "writeRunSummary"));
         long runId = jdbcTemplate.queryForObject("select id from recon_run", Long.class);
+        assertThat(reconcileExecution).bodyJson()
+                .hasPathSatisfying("$.statementFileId", f -> number(f.assertThat(), String.valueOf(fileId)))
+                .hasPathSatisfying("$.reconRunId", r -> number(r.assertThat(), String.valueOf(runId)));
 
         MvcTestResult summary = mvc.get().uri("/api/v1/recon-runs/{id}/summary", runId).with(as(VIEWER)).exchange();
         assertThat(summary).hasStatusOk();

@@ -1,13 +1,10 @@
 package com.darshan.recon.ingest;
 
+import com.darshan.recon.common.batch.ExecutionFailures;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.BatchStatus;
@@ -49,27 +46,8 @@ public class IngestJobListener implements JobExecutionListener {
         if (completedNormally) {
             statementFiles.markValidated(statementFileId);
         } else if (jobExecution.getStatus() == BatchStatus.FAILED) {
-            statementFiles.markFailed(statementFileId, failureReason(jobExecution));
+            statementFiles.markFailed(statementFileId, ExecutionFailures.reason(jobExecution));
         }
-    }
-
-    private static String failureReason(JobExecution jobExecution) {
-        List<Throwable> stepFailures = jobExecution.getStepExecutions().stream()
-                .flatMap(step -> step.getFailureExceptions().stream())
-                .toList();
-        List<Throwable> failures = stepFailures.isEmpty() ? jobExecution.getFailureExceptions() : stepFailures;
-        return failures.stream()
-                .findFirst()
-                .map(IngestJobListener::causalChainMessages)
-                .orElse("job failed without an exception");
-    }
-
-    private static String causalChainMessages(Throwable failure) {
-        return Stream.iterate(failure, Objects::nonNull, Throwable::getCause)
-                .map(Throwable::getMessage)
-                .filter(Objects::nonNull)
-                .distinct()
-                .collect(Collectors.joining(": "));
     }
 
     private static void logSummary(Long statementFileId, JobExecution jobExecution) {
