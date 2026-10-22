@@ -7,3 +7,16 @@ management:
   endpoint:
     health:
       show-details: always
+
+app:
+  security:
+    seed-users:
+      - username: ${RECON_DEV_VIEWER_USERNAME:viewer}
+        password: ${RECON_DEV_VIEWER_PASSWORD:}
+        roles: VIEWER
+      - username: ${RECON_DEV_OPERATOR_USERNAME:operator}
+        password: ${RECON_DEV_OPERATOR_PASSWORD:}
+        roles: OPERATOR
+      - username: ${RECON_DEV_APPROVER_USERNAME:approver}
+        password: ${RECON_DEV_APPROVER_PASSWORD:}
+        roles: APPROVER
