@@ -103,6 +103,9 @@ public class TestDataGenerator {
             Files.createDirectories(targetDir);
             GenerationManifest manifest = transactionTemplate.execute(status ->
                     new Run(request, random, accountNumber, fileName, partFile).execute());
+            // A reconcile run may follow within seconds; without fresh statistics the planner
+            // would not know that this account now has rows.
+            jdbcTemplate.execute("analyze ledger_transaction");
             // The statement becomes visible only after the ledger rows are committed, so a
             // poller can never pick up a file whose ledger side does not exist yet.
             Files.move(partFile, statementFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);

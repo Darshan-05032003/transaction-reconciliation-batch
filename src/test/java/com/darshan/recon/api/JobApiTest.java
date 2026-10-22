@@ -40,7 +40,8 @@ class JobApiTest extends ApiTestBase {
                 .hasPathSatisfying("$.parameters.filePath", f -> f.assertThat().asString().endsWith("api_clean.csv"))
                 .hasPathSatisfying("$.durationMs", d -> d.assertThat().isNotNull())
                 .hasPathSatisfying("$.steps[*].name", names -> names.assertThat().asArray()
-                        .containsExactly("computeChecksum", "validateControlTotals", "loadStatementLines"))
+                        .containsExactly("computeChecksum", "validateControlTotals", "loadStatementLines",
+                                "analyzeStatementLines"))
                 .hasPathSatisfying("$.steps[2].readCount", r -> r.assertThat().isEqualTo(5))
                 .hasPathSatisfying("$.steps[2].writeCount", w -> w.assertThat().isEqualTo(5))
                 .hasPathSatisfying("$.steps[2].skipCount", s -> s.assertThat().isEqualTo(0))

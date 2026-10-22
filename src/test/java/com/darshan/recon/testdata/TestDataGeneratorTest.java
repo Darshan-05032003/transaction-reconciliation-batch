@@ -76,6 +76,9 @@ class TestDataGeneratorTest {
                 .isNotEqualTo(Files.readAllBytes(inbox.resolve(withSeedOne.fileName())));
         assertThat(ledgerRowCount(withSeedOne.accountNumber())).isEqualTo(200);
         assertThat(ledgerRowCount(withSeedTwo.accountNumber())).isEqualTo(200);
+        assertThat(jdbcTemplate.queryForList(
+                "select attname from pg_stats where schemaname = current_schema() and tablename = 'ledger_transaction'",
+                String.class)).contains("account_number", "value_date");
     }
 
     @Test

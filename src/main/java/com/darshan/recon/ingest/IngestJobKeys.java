@@ -7,6 +7,7 @@ public final class IngestJobKeys {
     public static final String CHECKSUM_STEP = "computeChecksum";
     public static final String VALIDATE_STEP = "validateControlTotals";
     public static final String LOAD_STEP = "loadStatementLines";
+    public static final String ANALYZE_STEP = "analyzeStatementLines";
 
     public static final String FILE_PATH_PARAMETER = "filePath";
     public static final String RECEIVED_AT_PARAMETER = "receivedAt";
