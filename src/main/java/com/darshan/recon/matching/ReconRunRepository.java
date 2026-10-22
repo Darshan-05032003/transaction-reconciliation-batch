@@ -48,6 +48,18 @@ public class ReconRunRepository {
         requireOneRow(id, updated);
     }
 
+    public boolean exists(long id) {
+        Integer count = jdbcTemplate.queryForObject("select count(*) from recon_run where id = ?", Integer.class, id);
+        return count != null && count > 0;
+    }
+
+    public boolean hasRunningRun(long statementFileId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "select count(*) from recon_run where statement_file_id = ? and status = ?",
+                Integer.class, statementFileId, ReconRunStatus.RUNNING.name());
+        return count != null && count > 0;
+    }
+
     public int countBreaks(long reconRunId) {
         Integer count = jdbcTemplate.queryForObject(
                 "select count(*) from recon_break where recon_run_id = ?", Integer.class, reconRunId);

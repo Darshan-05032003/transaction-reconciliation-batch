@@ -9,6 +9,7 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -27,6 +28,7 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
     private static final String CORRELATION_ID = "correlationId";
     private static final String ERRORS = "errors";
+    private static final String ERROR_CODE = "errorCode";
 
     private record FieldViolation(String field, String message) {
     }
@@ -43,7 +45,16 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(BusinessRuleViolationException.class)
     ProblemDetail handleBusinessRule(BusinessRuleViolationException ex) {
-        return problem(HttpStatus.UNPROCESSABLE_CONTENT, ex.getMessage());
+        ProblemDetail problem = problem(HttpStatus.UNPROCESSABLE_CONTENT, ex.getMessage());
+        if (ex.errorCode() != null) {
+            problem.setProperty(ERROR_CODE, ex.errorCode());
+        }
+        return problem;
+    }
+
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    ProblemDetail handleOptimisticLock(OptimisticLockingFailureException ex) {
+        return problem(HttpStatus.CONFLICT, "The record was modified by someone else; reload it and try again");
     }
 
     @ExceptionHandler(ConstraintViolationException.class)
