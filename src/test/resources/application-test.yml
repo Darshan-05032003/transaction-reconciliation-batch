@@ -12,5 +12,5 @@ app:
       reports: ${java.io.tmpdir}/recon-test/reports
     chunk-size: 50
     grid-size: 2
-    skip-limit: 5
+    skip-limit: 50
     poll-cron: "-"
