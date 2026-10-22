@@ -16,6 +16,10 @@ spring:
       enabled: false
     jdbc:
       initialize-schema: never
+  task:
+    execution:
+      # Keep Boot's application executor even though the matching step defines its own pool.
+      mode: force
 
 server:
   port: ${SERVER_PORT:8083}
