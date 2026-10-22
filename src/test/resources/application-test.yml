@@ -1,4 +1,16 @@
-spring:
-  batch:
-    jdbc:
-      initialize-schema: always
+logging:
+  level:
+    com.darshan.recon: DEBUG
+
+app:
+  recon:
+    folders:
+      inbox: ${java.io.tmpdir}/recon-test/inbox
+      archive: ${java.io.tmpdir}/recon-test/archive
+      failed: ${java.io.tmpdir}/recon-test/failed
+      error: ${java.io.tmpdir}/recon-test/error
+      reports: ${java.io.tmpdir}/recon-test/reports
+    chunk-size: 50
+    grid-size: 2
+    skip-limit: 5
+    poll-cron: "-"

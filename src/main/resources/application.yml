@@ -1,15 +1,40 @@
 spring:
   application:
     name: transaction-reconciliation-batch
+  profiles:
+    default: dev
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5434/recon}
     username: ${DB_USERNAME:recon}
     password: ${DB_PASSWORD:recon}
   jpa:
     open-in-view: false
+    hibernate:
+      ddl-auto: validate
   batch:
     job:
       enabled: false
+    jdbc:
+      initialize-schema: never
 
 server:
   port: ${SERVER_PORT:8083}
+
+logging:
+  pattern:
+    level: "%5p [%X{correlationId:-}]"
+
+app:
+  recon:
+    folders:
+      inbox: ${RECON_INBOX_DIR:data/inbox}
+      archive: ${RECON_ARCHIVE_DIR:data/archive}
+      failed: ${RECON_FAILED_DIR:data/failed}
+      error: ${RECON_ERROR_DIR:data/error}
+      reports: ${RECON_REPORTS_DIR:data/reports}
+    chunk-size: ${RECON_CHUNK_SIZE:500}
+    grid-size: ${RECON_GRID_SIZE:4}
+    skip-limit: ${RECON_SKIP_LIMIT:100}
+    amount-tolerance: ${RECON_AMOUNT_TOLERANCE:0.00}
+    date-tolerance-days: ${RECON_DATE_TOLERANCE_DAYS:3}
+    poll-cron: ${RECON_POLL_CRON:0 */5 * * * *}
