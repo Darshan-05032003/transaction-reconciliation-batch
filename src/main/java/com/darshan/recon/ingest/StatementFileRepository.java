@@ -2,6 +2,7 @@ package com.darshan.recon.ingest;
 
 import com.darshan.recon.ingest.file.StatementHeader;
 import com.darshan.recon.ingest.file.StatementTrailer;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -22,6 +23,22 @@ public class StatementFileRepository {
         return jdbcTemplate.query(
                         "select id from statement_file where checksum_sha256 = ?",
                         (rs, rowNum) -> rs.getLong("id"), checksumSha256)
+                .stream()
+                .findFirst();
+    }
+
+    public Optional<StatementFileRecord> findById(long id) {
+        return jdbcTemplate.query("""
+                        select id, file_name, account_number, statement_date, status
+                        from statement_file where id = ?
+                        """,
+                        (rs, rowNum) -> new StatementFileRecord(
+                                rs.getLong("id"),
+                                rs.getString("file_name"),
+                                rs.getString("account_number"),
+                                rs.getObject("statement_date", LocalDate.class),
+                                StatementFileStatus.valueOf(rs.getString("status"))),
+                        id)
                 .stream()
                 .findFirst();
     }
@@ -58,6 +75,10 @@ public class StatementFileRepository {
 
     public void markFailed(long id, String reason) {
         updateStatus(id, StatementFileStatus.FAILED, reason);
+    }
+
+    public void markReconciled(long id) {
+        updateStatus(id, StatementFileStatus.RECONCILED, null);
     }
 
     private void updateStatus(long id, StatementFileStatus status, String reason) {
