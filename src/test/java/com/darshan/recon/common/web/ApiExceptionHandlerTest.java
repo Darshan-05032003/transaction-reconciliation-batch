@@ -80,7 +80,17 @@ class ApiExceptionHandlerTest {
 
         assertThat(result).hasStatus(422).hasContentTypeCompatibleWith(PROBLEM_JSON);
         assertThat(result).bodyJson()
+                .hasPathSatisfying("$.errorCode", c -> c.assertThat().isEqualTo("SELF_APPROVAL"))
                 .extractingPath("$.detail").asString().contains("cannot be approved");
+    }
+
+    @Test
+    void optimisticLockFailureBecomes409() {
+        MvcTestResult result = mvc.get().uri("/probe/stale").exchange();
+
+        assertThat(result).hasStatus(409).hasContentTypeCompatibleWith(PROBLEM_JSON);
+        assertThat(result).bodyJson()
+                .extractingPath("$.detail").asString().contains("modified by someone else");
     }
 
     @Test

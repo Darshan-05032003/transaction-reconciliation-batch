@@ -7,6 +7,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -38,7 +39,12 @@ class ErrorProbeController {
 
     @GetMapping("/unprocessable")
     void unprocessable() {
-        throw new BusinessRuleViolationException("A write-off cannot be approved by the user who requested it");
+        throw new BusinessRuleViolationException("SELF_APPROVAL", "A write-off cannot be approved by the user who requested it");
+    }
+
+    @GetMapping("/stale")
+    void stale() {
+        throw new OptimisticLockingFailureException("row version changed");
     }
 
     @GetMapping("/boom")

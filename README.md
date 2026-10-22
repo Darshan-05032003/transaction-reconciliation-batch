@@ -9,10 +9,11 @@ Requirements: Java 21 and Docker.
 ```bash
 cp .env.example .env
 docker compose up -d
+set -a; source .env; set +a
 ./mvnw spring-boot:run
 ```
 
-The application starts with the `dev` profile on port 8083 and runs the Flyway migrations against the PostgreSQL container on port 5434.
+The application starts with the `dev` profile on port 8083 and runs the Flyway migrations against the PostgreSQL container on port 5434. Exporting `.env` is what gives the dev profile its API users (see Security); without it the application starts with no users.
 
 ## Configuration
 
@@ -72,6 +73,8 @@ When the job completes, the file is marked `VALIDATED` and one summary line is l
 1. `createReconRun` inserts a `recon_run` row linked to the job execution and derives the ledger window: all ledger transactions of the statement's account whose value date lies within `RECON_DATE_TOLERANCE_DAYS` of the statement date.
 2. `matchCandidates` is a partitioned step. The candidate pairs are built in SQL with a `FULL OUTER JOIN` between the statement lines of the file and the ledger transactions of the window on the normalised reference (trimmed, internal whitespace collapsed, upper-cased). A reference that appears more than once in the statement is collapsed to one candidate row that carries every line number. The rows are split into partitions by a hash of the normalised reference, so both sides of a pair always land in the same partition; each partition streams its rows through a `JdbcCursorItemReader`, classifies them with the matching rules and writes breaks to `recon_break` with JDBC batches, one transaction per chunk. The number of partitions defaults to `RECON_GRID_SIZE`, which is also the size of the thread pool, and can be overridden per run with the non-identifying parameter `gridSize`.
 3. `finaliseReconRun` recounts the breaks and the candidate pairs set-based, stores `matched_count` and `break_count` on the run and marks the file `RECONCILED`.
+4. `writeBreakReport` streams every break of the run through a cursor into `data/reports/recon_<statementDate>_<runId>.csv`.
+5. `writeRunSummary` writes `data/reports/recon_<statementDate>_<runId>_summary.csv`.
 
 The rules are applied in this order; the first one that applies decides:
 
@@ -84,6 +87,59 @@ The rules are applied in this order; the first one that applies decides:
 | `VALUE_DATE_MISMATCH` | same reference and amount, different value date; within `RECON_DATE_TOLERANCE_DAYS` the break is a warning, outside it an error, which is recorded in `details` |
 
 Pairs that no rule claims are matches; they are counted but not stored. A failed execution can be restarted and resumes every partition after its last committed chunk, under the same run id. A file that is already `RECONCILED` is only reconciled again when the launch carries the identifying parameter `rerun` (for example the time of the request); the new run gets its own id and the previous run's breaks are kept as history.
+
+## Reports
+
+Every run produces two files in `RECON_REPORTS_DIR`:
+
+- `recon_<statementDate>_<runId>.csv`: one row per break with `break_id, break_type, severity, ledger_reference, bank_reference, line_number, ledger_amount, bank_amount, ledger_value_date, bank_value_date, details, status`, grouped by break type. Fields are quoted only when they contain a comma or a quote.
+- `recon_<statementDate>_<runId>_summary.csv`: `metric,value` rows with the run and file ids, the account, the statement date, `matched_count`, `break_count`, `match_rate_percent` (matched over matched plus breaks, two decimals) and one `breaks_<type>` row per break type.
+
+## API
+
+The API is documented with OpenAPI at `/v3/api-docs` and `/swagger-ui.html` (both need a login). Every request carries HTTP Basic credentials; errors are RFC 9457 problem details (`application/problem+json`) with a `correlationId`, and business rule violations add an `errorCode`.
+
+| Method and path | Role | What it does |
+|---|---|---|
+| `POST /api/v1/jobs/ingest` `{"filePath": "<name or path inside the inbox>"}` | OPERATOR | Starts `ingestStatementJob` asynchronously; `202` with the execution id and a `Location` header. `422` when the file is missing or outside the inbox, `409` when that path was already ingested. |
+| `POST /api/v1/jobs/reconcile/{statementFileId}?gridSize=&rerun=` | OPERATOR | Starts `reconcileJob` asynchronously for a `VALIDATED` file; `202`. A `RECONCILED` file needs `rerun=true`; other statuses and a run already in progress give `409`. |
+| `GET /api/v1/jobs/executions/{id}` | any role | Status, exit code, parameters, timings and per-step read, write, filter, skip, commit and rollback counts. |
+| `POST /api/v1/jobs/executions/{id}/stop` | OPERATOR | Asks a running execution to stop at its next chunk boundary; `409` when it is not running. |
+| `POST /api/v1/jobs/executions/{id}/restart` | OPERATOR | Restarts a `FAILED` or `STOPPED` execution and returns the new execution id; `409` otherwise. |
+| `GET /api/v1/recon-runs/{id}/summary` | any role | Matched and break counts, match rate, breaks per type and per status. |
+| `GET /api/v1/recon-runs/{id}/breaks?type=&status=&page=&size=` | any role | Paged breaks of a run (default page size 50, maximum 200), optionally filtered by break type and status. |
+| `GET /api/v1/breaks/{id}` | any role | One break with its resolution history. |
+| `PATCH /api/v1/breaks/{id}/resolve` `{"action": "RESOLVED" or "WRITTEN_OFF", "comment": "..."}` | OPERATOR | Resolves an `OPEN` break. A write-off whose exposure is at or below `RECON_WRITE_OFF_APPROVAL_THRESHOLD` is final; above it the break becomes `PENDING_APPROVAL`. `409` when the break is not `OPEN`. |
+| `POST /api/v1/breaks/{id}/approve` `{"comment": "..."}` | APPROVER | Confirms a pending write-off. The requesting user cannot approve their own request (`422`, `errorCode` `SELF_APPROVAL`). |
+| `POST /api/v1/breaks/{id}/reject` `{"comment": "..."}` | APPROVER | Sends a pending write-off back to `OPEN`; the request stays in the history. |
+
+The exposure of a break is the amount at stake if it is written off: the difference for an amount mismatch, the full amount for a missing or duplicated transaction. Every resolution action is recorded in `recon_break_action` with the user, the time and the comment; the break row keeps the current state (`resolved_by`, `requested_by`, `approved_by` and their timestamps).
+
+Example session:
+
+```bash
+curl -u operator:operator-dev -X POST localhost:8083/api/v1/jobs/ingest \
+     -H 'Content-Type: application/json' -d '{"filePath": "statement_BANK01_607867200891_2026-10-01.csv"}'
+curl -u viewer:viewer-dev localhost:8083/api/v1/jobs/executions/1
+curl -u operator:operator-dev -X POST localhost:8083/api/v1/jobs/reconcile/1
+curl -u viewer:viewer-dev localhost:8083/api/v1/recon-runs/1/summary
+curl -u operator:operator-dev -X PATCH localhost:8083/api/v1/breaks/7/resolve \
+     -H 'Content-Type: application/json' -d '{"action": "RESOLVED", "comment": "posted on the next day"}'
+```
+
+## Security
+
+Users live in the `app_user` table with BCrypt password hashes and one or more roles in `app_user_role`:
+
+| Role | Allowed |
+|---|---|
+| `VIEWER` | every `GET` under `/api/v1` |
+| `OPERATOR` | launch, stop and restart jobs, resolve breaks and request write-offs |
+| `APPROVER` | approve or reject pending write-offs |
+
+Authentication is HTTP Basic over a stateless chain: no session, no cookie, CSRF disabled because there is no ambient credential for a cross-site request to reuse. `401` and `403` are problem details like every other error. `/actuator/health` is open so that scripts and the container health check can call it; everything else needs a login.
+
+Under the `dev` profile the users named in `.env` (`RECON_DEV_*`) are created or updated at startup with their passwords hashed. In other profiles insert users directly, for example with a hash from `htpasswd -nbBC 10 '' 'secret' | cut -d: -f2` stored as `{bcrypt}<hash>`.
 
 ## Testing
 

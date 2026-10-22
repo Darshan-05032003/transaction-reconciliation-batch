@@ -1,5 +1,6 @@
 package com.darshan.recon.matching;
 
+import com.darshan.recon.matching.engine.BreakSeverity;
 import com.darshan.recon.matching.engine.CandidatePair;
 import com.darshan.recon.matching.engine.LedgerSide;
 import com.darshan.recon.matching.engine.MatchOutcome.AmountMismatch;
@@ -32,28 +33,28 @@ public class MatchingItemProcessor implements ItemProcessor<CandidatePair, Recon
     public ReconBreakRow process(CandidatePair pair) {
         return switch (engine.classify(pair)) {
             case Matched ignored -> null;
-            case AmountMismatch mismatch -> row(ReconBreakType.AMOUNT_MISMATCH,
+            case AmountMismatch mismatch -> row(ReconBreakType.AMOUNT_MISMATCH, BreakSeverity.ERROR,
                     mismatch.ledger().id(), mismatch.statement().id(),
                     mismatch.ledger().amount(), mismatch.statement().amount(),
                     "amount differs by %s (ledger %s, bank %s, tolerance %s)".formatted(
                             plain(mismatch.difference()), plain(mismatch.ledger().amount()),
                             plain(mismatch.statement().amount()), plain(mismatch.tolerance())));
-            case ValueDateMismatch mismatch -> row(ReconBreakType.VALUE_DATE_MISMATCH,
+            case ValueDateMismatch mismatch -> row(ReconBreakType.VALUE_DATE_MISMATCH, mismatch.severity(),
                     mismatch.ledger().id(), mismatch.statement().id(),
                     mismatch.ledger().amount(), mismatch.statement().amount(),
                     "value date differs by %d day(s) (ledger %s, bank %s), %s tolerance of %d day(s): %s".formatted(
                             mismatch.daysApart(), mismatch.ledger().valueDate(), mismatch.statement().valueDate(),
                             mismatch.withinTolerance() ? "within" : "outside", mismatch.toleranceDays(),
                             mismatch.severity().name().toLowerCase(Locale.ROOT)));
-            case MissingInBank missing -> row(ReconBreakType.MISSING_IN_BANK,
+            case MissingInBank missing -> row(ReconBreakType.MISSING_IN_BANK, BreakSeverity.ERROR,
                     missing.ledger().id(), null, missing.ledger().amount(), null,
                     "ledger transaction %s with value date %s has no statement line".formatted(
                             missing.ledger().reference(), missing.ledger().valueDate()));
-            case MissingInLedger missing -> row(ReconBreakType.MISSING_IN_LEDGER,
+            case MissingInLedger missing -> row(ReconBreakType.MISSING_IN_LEDGER, BreakSeverity.ERROR,
                     null, missing.statement().id(), null, missing.statement().amount(),
                     "statement line %d (%s) has no ledger transaction".formatted(
                             missing.statement().lineNumber(), missing.statement().reference()));
-            case DuplicateInStatement duplicate -> row(ReconBreakType.DUPLICATE_IN_STATEMENT,
+            case DuplicateInStatement duplicate -> row(ReconBreakType.DUPLICATE_IN_STATEMENT, BreakSeverity.ERROR,
                     duplicate.ledger() == null ? null : duplicate.ledger().id(), duplicate.firstCopy().id(),
                     duplicate.ledger() == null ? null : duplicate.ledger().amount(), duplicate.firstCopy().amount(),
                     duplicateDetails(duplicate));
@@ -68,9 +69,9 @@ public class MatchingItemProcessor implements ItemProcessor<CandidatePair, Recon
                 ledger == null ? "no ledger transaction" : "ledger transaction " + ledger.reference() + " left unmatched");
     }
 
-    private ReconBreakRow row(ReconBreakType type, Long ledgerTxnId, Long statementLineId,
+    private ReconBreakRow row(ReconBreakType type, BreakSeverity severity, Long ledgerTxnId, Long statementLineId,
                               BigDecimal ledgerAmount, BigDecimal bankAmount, String details) {
-        return new ReconBreakRow(reconRunId, type, ledgerTxnId, statementLineId, ledgerAmount, bankAmount,
+        return new ReconBreakRow(reconRunId, type, severity, ledgerTxnId, statementLineId, ledgerAmount, bankAmount,
                 details.length() <= MAX_DETAILS_LENGTH ? details : details.substring(0, MAX_DETAILS_LENGTH));
     }
 

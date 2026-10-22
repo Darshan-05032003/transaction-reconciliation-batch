@@ -23,7 +23,8 @@ public record ReconProperties(
         @Min(0) int skipLimit,
         @NotNull @DecimalMin("0.00") @Digits(integer = 17, fraction = 2) BigDecimal amountTolerance,
         @Min(0) @Max(30) int dateToleranceDays,
-        @NotBlank String pollCron) {
+        @NotBlank String pollCron,
+        @NotNull @DecimalMin("0.00") @Digits(integer = 17, fraction = 2) BigDecimal writeOffApprovalThreshold) {
 
     public static final String POLLING_DISABLED = "-";
 

@@ -24,7 +24,8 @@ class ReconPropertiesTest {
                     "app.recon.skip-limit=10",
                     "app.recon.amount-tolerance=0.05",
                     "app.recon.date-tolerance-days=2",
-                    "app.recon.poll-cron=0 */5 * * * *");
+                    "app.recon.poll-cron=0 */5 * * * *",
+                    "app.recon.write-off-approval-threshold=10000.00");
 
     @Test
     void bindsNestedFoldersAndNumericSettings() {
@@ -39,6 +40,7 @@ class ReconPropertiesTest {
             assertThat(properties.amountTolerance()).isEqualByComparingTo(new BigDecimal("0.05"));
             assertThat(properties.dateToleranceDays()).isEqualTo(2);
             assertThat(properties.pollCron()).isEqualTo("0 */5 * * * *");
+            assertThat(properties.writeOffApprovalThreshold()).isEqualByComparingTo(new BigDecimal("10000.00"));
         });
     }
 
@@ -60,6 +62,13 @@ class ReconPropertiesTest {
         runner.withPropertyValues("app.recon.amount-tolerance=-0.01")
                 .run(context -> assertThat(context).hasFailed()
                         .getFailure().rootCause().hasMessageContaining("amountTolerance"));
+    }
+
+    @Test
+    void rejectsNegativeWriteOffApprovalThreshold() {
+        runner.withPropertyValues("app.recon.write-off-approval-threshold=-1.00")
+                .run(context -> assertThat(context).hasFailed()
+                        .getFailure().rootCause().hasMessageContaining("writeOffApprovalThreshold"));
     }
 
     @Test
