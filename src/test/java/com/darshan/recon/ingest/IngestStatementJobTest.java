@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.ExitStatus;
+import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.parameters.InvalidJobParametersException;
 import org.springframework.batch.core.job.parameters.JobParameters;
@@ -34,6 +35,7 @@ import org.springframework.batch.test.JobOperatorTestUtils;
 import org.springframework.batch.test.JobRepositoryTestUtils;
 import org.springframework.batch.test.context.SpringBatchTest;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -52,6 +54,10 @@ class IngestStatementJobTest {
     private JobOperatorTestUtils jobOperatorTestUtils;
 
     @Autowired
+    @Qualifier("ingestStatementJob")
+    private Job ingestStatementJob;
+
+    @Autowired
     private JobRepositoryTestUtils jobRepositoryTestUtils;
 
     @Autowired
@@ -68,6 +74,7 @@ class IngestStatementJobTest {
 
     @BeforeEach
     void startFromAnEmptyState() {
+        jobOperatorTestUtils.setJob(ingestStatementJob);
         jobRepositoryTestUtils.removeJobExecutions();
         jdbcTemplate.update("delete from statement_line");
         jdbcTemplate.update("delete from statement_file");
