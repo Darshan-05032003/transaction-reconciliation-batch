@@ -7,6 +7,19 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5434/recon}
     username: ${DB_USERNAME:recon}
     password: ${DB_PASSWORD:recon}
+    hikari:
+      # Every running matching partition holds two connections (cursor plus chunk transaction),
+      # so the pool must be at least 2 * RECON_GRID_SIZE + 2.
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+      data-source-properties:
+        # Lets the PostgreSQL driver turn a JDBC batch of single-row inserts into multi-row
+        # inserts; it halved the generator's insert time and cut the ingest load step by about
+        # a quarter at 1,000,000 rows on the machine the README's Performance section describes.
+        reWriteBatchedInserts: true
+        # Session work_mem for every connection: the pairing query sorts and hashes one
+        # partition's share of a file, which fits in memory at 64MB but spills to disk at the
+        # server default of 4MB (see the Performance section of the README).
+        options: -c work_mem=${DB_WORK_MEM:64MB}
   jpa:
     open-in-view: false
     hibernate:

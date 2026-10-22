@@ -1,5 +1,6 @@
 package com.darshan.recon.ingest;
 
+import com.darshan.recon.common.batch.AnalyzeTableTasklet;
 import com.darshan.recon.common.config.ReconProperties;
 import com.darshan.recon.ingest.file.MalformedRecordException;
 import com.darshan.recon.ingest.file.StatementFileValidator;
@@ -30,6 +31,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.dao.TransientDataAccessException;
 import org.springframework.jdbc.CannotGetJdbcConnectionException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -63,7 +65,8 @@ public class IngestJobConfiguration {
     // carry a failed checksum step straight into validation.
     @Bean
     public Job ingestStatementJob(Step computeChecksumStep, Step validateControlTotalsStep,
-                                  Step loadStatementLinesStep, IngestJobListener ingestJobListener) {
+                                  Step loadStatementLinesStep, Step analyzeStatementLinesStep,
+                                  IngestJobListener ingestJobListener) {
         String completed = ExitStatus.COMPLETED.getExitCode();
         return new JobBuilder(IngestJobKeys.JOB_NAME, jobRepository)
                 .validator(new StatementFilePathValidator())
@@ -73,6 +76,7 @@ public class IngestJobConfiguration {
                 .from(computeChecksumStep).on(completed).to(validateControlTotalsStep)
                 .from(validateControlTotalsStep).on(IngestJobKeys.EXIT_REJECTED).end(IngestJobKeys.EXIT_REJECTED)
                 .from(validateControlTotalsStep).on(completed).to(loadStatementLinesStep)
+                .from(loadStatementLinesStep).on(completed).to(analyzeStatementLinesStep)
                 .end()
                 .build();
     }
@@ -123,6 +127,15 @@ public class IngestJobConfiguration {
                 .skipListener(skippedLineWriter)
                 .retry(TransientDataAccessException.class, CannotGetJdbcConnectionException.class)
                 .retryLimit(TRANSIENT_RETRY_LIMIT)
+                .build();
+    }
+
+    // The reconcile job usually follows within seconds and its pairing query must be planned
+    // with statistics that include the lines just loaded.
+    @Bean
+    public Step analyzeStatementLinesStep(JdbcTemplate jdbcTemplate) {
+        return new StepBuilder(IngestJobKeys.ANALYZE_STEP, jobRepository)
+                .tasklet(new AnalyzeTableTasklet(jdbcTemplate, "statement_line"), transactionManager)
                 .build();
     }
 

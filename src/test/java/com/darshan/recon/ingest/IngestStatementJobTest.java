@@ -76,6 +76,9 @@ class IngestStatementJobTest {
     void startFromAnEmptyState() {
         jobOperatorTestUtils.setJob(ingestStatementJob);
         jobRepositoryTestUtils.removeJobExecutions();
+        jdbcTemplate.update("delete from recon_break_action");
+        jdbcTemplate.update("delete from recon_break");
+        jdbcTemplate.update("delete from recon_run");
         jdbcTemplate.update("delete from statement_line");
         jdbcTemplate.update("delete from statement_file");
     }
@@ -89,12 +92,15 @@ class IngestStatementJobTest {
         assertThat(execution.getStatus()).isEqualTo(BatchStatus.COMPLETED);
         assertThat(execution.getExitStatus().getExitCode()).isEqualTo(ExitStatus.COMPLETED.getExitCode());
         assertThat(execution.getStepExecutions()).extracting(StepExecution::getStepName)
-                .containsExactly(IngestJobKeys.CHECKSUM_STEP, IngestJobKeys.VALIDATE_STEP, IngestJobKeys.LOAD_STEP);
+                .containsExactly(IngestJobKeys.CHECKSUM_STEP, IngestJobKeys.VALIDATE_STEP, IngestJobKeys.LOAD_STEP,
+                        IngestJobKeys.ANALYZE_STEP);
 
         StepExecution load = step(execution, IngestJobKeys.LOAD_STEP);
         assertThat(load.getReadCount()).isEqualTo(5);
         assertThat(load.getWriteCount()).isEqualTo(5);
         assertThat(load.getSkipCount()).isZero();
+        assertThat(step(execution, IngestJobKeys.ANALYZE_STEP).getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        assertThat(statisticsColumns("statement_line")).contains("statement_file_id", "bank_reference");
 
         Map<String, Object> statementFile = singleStatementFile();
         assertThat(statementFile.get("status")).isEqualTo("VALIDATED");
@@ -247,6 +253,11 @@ class IngestStatementJobTest {
         return properties.folders().error().resolve(file.getFileName() + ".errors.csv");
     }
 
+
+    private List<String> statisticsColumns(String table) {
+        return jdbcTemplate.queryForList(
+                "select attname from pg_stats where schemaname = current_schema() and tablename = ?", String.class, table);
+    }
 
     private Map<String, Object> singleStatementFile() {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList("select * from statement_file");
