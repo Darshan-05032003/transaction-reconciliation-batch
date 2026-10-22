@@ -42,3 +42,4 @@ app:
     amount-tolerance: ${RECON_AMOUNT_TOLERANCE:0.00}
     date-tolerance-days: ${RECON_DATE_TOLERANCE_DAYS:3}
     poll-cron: ${RECON_POLL_CRON:0 */5 * * * *}
+    write-off-approval-threshold: ${RECON_WRITE_OFF_APPROVAL_THRESHOLD:10000.00}

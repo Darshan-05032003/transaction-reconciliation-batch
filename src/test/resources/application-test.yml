@@ -14,3 +14,4 @@ app:
     grid-size: 2
     skip-limit: 50
     poll-cron: "-"
+    write-off-approval-threshold: 1000.00

@@ -22,12 +22,12 @@ class SchemaMigrationTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    void appliesBothMigrationsSuccessfully() {
+    void appliesEveryMigrationSuccessfully() {
         List<String> applied = jdbcTemplate.queryForList(
                 "select version from flyway_schema_history where success order by installed_rank",
                 String.class);
 
-        assertThat(applied).containsExactly("1", "2");
+        assertThat(applied).containsExactly("1", "2", "3");
     }
 
     @Test
@@ -39,7 +39,8 @@ class SchemaMigrationTest {
         assertThat(tables).contains(
                 "batch_job_instance", "batch_job_execution", "batch_job_execution_params",
                 "batch_step_execution", "batch_step_execution_context", "batch_job_execution_context",
-                "ledger_transaction", "statement_file", "statement_line", "recon_run", "recon_break");
+                "ledger_transaction", "statement_file", "statement_line", "recon_run", "recon_break",
+                "recon_break_action", "app_user", "app_user_role");
     }
 
     @Test
@@ -68,7 +69,9 @@ class SchemaMigrationTest {
                 "ix_recon_run_job_execution",
                 "ix_recon_break_run_type_status",
                 "ix_recon_break_ledger_txn",
-                "ix_recon_break_statement_line");
+                "ix_recon_break_statement_line",
+                "ix_recon_break_action_break",
+                "uk_app_user_username");
     }
 
     @Test
@@ -95,6 +98,35 @@ class SchemaMigrationTest {
                 """, "b".repeat(64)))
                 .isInstanceOf(DataIntegrityViolationException.class)
                 .hasMessageContaining("ck_statement_file_status");
+    }
+
+    @Test
+    @Transactional
+    void rejectsPendingApprovalWithoutARequester() {
+        jdbcTemplate.update("""
+                insert into statement_file (file_name, checksum_sha256, status, received_at)
+                values ('stmt.csv', ?, 'VALIDATED', now())
+                """, "d".repeat(64));
+        Long fileId = jdbcTemplate.queryForObject(
+                "select id from statement_file where checksum_sha256 = ?", Long.class, "d".repeat(64));
+        jdbcTemplate.update("""
+                insert into recon_run (statement_file_id, started_at, status) values (?, now(), 'RUNNING')
+                """, fileId);
+        Long runId = jdbcTemplate.queryForObject(
+                "select id from recon_run where statement_file_id = ?", Long.class, fileId);
+        jdbcTemplate.update("""
+                insert into statement_line (statement_file_id, line_number, bank_reference, account_number, amount, currency, value_date)
+                values (?, 2, 'TXN-1', '000123456789', 10.00, 'INR', date '2026-10-01')
+                """, fileId);
+        Long lineId = jdbcTemplate.queryForObject(
+                "select id from statement_line where statement_file_id = ?", Long.class, fileId);
+
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                insert into recon_break (recon_run_id, break_type, statement_line_id, status)
+                values (?, 'MISSING_IN_LEDGER', ?, 'PENDING_APPROVAL')
+                """, runId, lineId))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_recon_break_resolution");
     }
 
     @Test

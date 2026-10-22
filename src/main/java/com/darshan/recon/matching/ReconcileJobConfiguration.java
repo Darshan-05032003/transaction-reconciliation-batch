@@ -35,9 +35,9 @@ public class ReconcileJobConfiguration {
 
     private static final String INSERT_RECON_BREAK = """
             insert into recon_break
-                (recon_run_id, break_type, ledger_txn_id, statement_line_id, ledger_amount, bank_amount, details)
+                (recon_run_id, break_type, severity, ledger_txn_id, statement_line_id, ledger_amount, bank_amount, details)
             values
-                (:reconRunId, :breakType, :ledgerTxnId, :statementLineId, :ledgerAmount, :bankAmount, :details)
+                (:reconRunId, :breakType, :severity, :ledgerTxnId, :statementLineId, :ledgerAmount, :bankAmount, :details)
             """;
 
     private final JobRepository jobRepository;
@@ -175,6 +175,7 @@ public class ReconcileJobConfiguration {
                 .itemSqlParameterSourceProvider(row -> new MapSqlParameterSource()
                         .addValue("reconRunId", row.reconRunId())
                         .addValue("breakType", row.breakType().name())
+                        .addValue("severity", row.severity().name())
                         .addValue("ledgerTxnId", row.ledgerTxnId())
                         .addValue("statementLineId", row.statementLineId())
                         .addValue("ledgerAmount", row.ledgerAmount())
