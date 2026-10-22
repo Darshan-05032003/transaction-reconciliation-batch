@@ -1,0 +1,24 @@
+# Build output
+target/
+*.log
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+*.swp
+.DS_Store
+
+# Environment and secrets
+.env
+.env.local
+
+# Runtime folders created by the application and scripts
+logs/
+data/
