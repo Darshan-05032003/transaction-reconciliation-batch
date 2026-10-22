@@ -1,5 +1,6 @@
 package com.darshan.recon.api;
 
+import com.darshan.recon.common.batch.JobParameterKeys;
 import com.darshan.recon.common.config.ReconProperties;
 import com.darshan.recon.common.exception.BusinessRuleViolationException;
 import com.darshan.recon.common.exception.ConflictException;
@@ -37,8 +38,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class JobLaunchService {
 
-    public static final String LAUNCHED_BY_PARAMETER = "launchedBy";
-
     private static final Logger log = LoggerFactory.getLogger(JobLaunchService.class);
 
     private final JobOperator jobOperator;
@@ -70,7 +69,7 @@ public class JobLaunchService {
         Path file = resolveInboxFile(filePath);
         JobParameters parameters = new JobParametersBuilder()
                 .addString(IngestJobKeys.FILE_PATH_PARAMETER, file.toString())
-                .addString(LAUNCHED_BY_PARAMETER, requestedBy, false)
+                .addString(JobParameterKeys.LAUNCHED_BY, requestedBy, false)
                 .toJobParameters();
         return launch(ingestJob, parameters);
     }
@@ -80,7 +79,7 @@ public class JobLaunchService {
                 .orElseThrow(() -> new NotFoundException("Statement file", statementFileId));
         JobParametersBuilder parameters = new JobParametersBuilder()
                 .addLong(ReconcileJobKeys.STATEMENT_FILE_ID_PARAMETER, statementFileId)
-                .addString(LAUNCHED_BY_PARAMETER, requestedBy, false);
+                .addString(JobParameterKeys.LAUNCHED_BY, requestedBy, false);
         switch (file.status()) {
             case VALIDATED -> {
             }

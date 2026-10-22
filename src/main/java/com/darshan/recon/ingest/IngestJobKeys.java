@@ -9,6 +9,7 @@ public final class IngestJobKeys {
     public static final String LOAD_STEP = "loadStatementLines";
 
     public static final String FILE_PATH_PARAMETER = "filePath";
+    public static final String RECEIVED_AT_PARAMETER = "receivedAt";
 
     public static final String STATEMENT_FILE_ID = "statementFileId";
     public static final String ACCOUNT_NUMBER = "accountNumber";

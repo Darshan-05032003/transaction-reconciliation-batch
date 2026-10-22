@@ -20,6 +20,8 @@ spring:
     execution:
       # Keep Boot's application executor even though the matching step defines its own pool.
       mode: force
+    scheduling:
+      thread-name-prefix: recon-schedule-
 
 server:
   port: ${SERVER_PORT:8083}
