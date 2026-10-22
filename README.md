@@ -154,7 +154,7 @@ The application polls `RECON_INBOX_DIR` on the Spring cron expression in `RECON_
 
 | Outcome | Where the file goes |
 |---|---|
-| ingested and reconciled | `RECON_ARCHIVE_DIR/<yyyy-MM-dd>/<file>`, dated by the processing day |
+| ingested and reconciled | `RECON_ARCHIVE_DIR/<yyyy-MM-dd>/<file>`, dated by the processing day in the application's clock (UTC) |
 | `DUPLICATE` (content already ingested) | `RECON_FAILED_DIR/<file>` plus `<file>.reason` naming the earlier `statement_file` |
 | `REJECTED` (control totals) | `RECON_FAILED_DIR/<file>` plus `<file>.reason` with the validator's message |
 | a job ended `FAILED` | `RECON_FAILED_DIR/<file>` plus `<file>.reason` with the failure and the execution id to restart |

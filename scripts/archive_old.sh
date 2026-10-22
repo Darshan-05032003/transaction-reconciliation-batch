@@ -76,6 +76,7 @@ archive_day() {
   local archive="${ARCHIVE_DIR}/${day}.tar.gz"
   local file_count
   file_count="$(find "${folder}" -type f | wc -l)"
+  local files="${file_count} file(s)"
 
   if [[ -f "${archive}" ]] && verify_archive "${archive}" "${day}"; then
     log INFO "${archive} already exists and verifies; removing ${folder}"
@@ -83,11 +84,11 @@ archive_day() {
     return 0
   fi
   if [[ "${DRY_RUN}" == true ]]; then
-    log INFO "Would archive ${folder} (${file_count} files) to ${archive}"
+    log INFO "Would archive ${folder} (${files}) to ${archive}"
     return 0
   fi
 
-  log INFO "Archiving ${folder} (${file_count} files) to ${archive}"
+  log INFO "Archiving ${folder} (${files}) to ${archive}"
   rm -f "${archive}.part"
   tar -czf "${archive}.part" -C "${ARCHIVE_DIR}" "${day}"
   if ! verify_archive "${archive}.part" "${day}"; then
@@ -151,7 +152,11 @@ while IFS= read -r folder; do
   fi
 done < <(find "${ARCHIVE_DIR}" -mindepth 1 -maxdepth 1 -type d | sort)
 
-log INFO "Done: ${archived} folder(s) archived, ${failures} failure(s)"
+if [[ "${DRY_RUN}" == true ]]; then
+  log INFO "Dry run: ${archived} folder(s) would be archived"
+else
+  log INFO "Done: ${archived} folder(s) archived, ${failures} failure(s)"
+fi
 if (( failures > 0 )); then
   exit "${EXIT_VERIFY}"
 fi
