@@ -28,6 +28,7 @@ import org.springframework.batch.core.launch.JobOperator;
 import org.springframework.batch.core.launch.JobRestartException;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.stereotype.Service;
 
 // Validates a request fully before it reaches the JobOperator: Spring Batch 6 creates the
@@ -150,8 +151,15 @@ public class JobLaunchService {
         }
     }
 
+    // Batch 6.0.6's JDBC DAO resolves the instance id before its own "no such execution"
+    // guard, so an unknown id surfaces as EmptyResultDataAccessException rather than null.
     private JobExecution requireExecution(long executionId) {
-        JobExecution execution = jobRepository.getJobExecution(executionId);
+        JobExecution execution;
+        try {
+            execution = jobRepository.getJobExecution(executionId);
+        } catch (EmptyResultDataAccessException e) {
+            execution = null;
+        }
         if (execution == null) {
             throw new NotFoundException("Job execution", executionId);
         }
