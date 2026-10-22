@@ -1,0 +1,9 @@
+logging:
+  level:
+    com.darshan.recon: DEBUG
+    org.springframework.batch: INFO
+
+management:
+  endpoint:
+    health:
+      show-details: always
