@@ -1,5 +1,6 @@
 package com.darshan.recon.matching;
 
+import static com.darshan.recon.JobMetadataCleanup.removeAllJobs;
 import static com.darshan.recon.matching.ReconcileJobTestSupport.breakCountsByType;
 import static com.darshan.recon.matching.ReconcileJobTestSupport.canonicalBreaks;
 import static com.darshan.recon.matching.ReconcileJobTestSupport.ingest;
@@ -89,7 +90,7 @@ class ReconcileJobRestartTest {
     @BeforeEach
     void startFromAnEmptyState() {
         fault.disarm();
-        jobRepositoryTestUtils.removeJobExecutions();
+        removeAllJobs(jobRepositoryTestUtils, jdbcTemplate);
         jdbcTemplate.update("delete from recon_break");
         jdbcTemplate.update("delete from recon_run");
         jdbcTemplate.update("delete from statement_line");

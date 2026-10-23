@@ -1,5 +1,6 @@
 package com.darshan.recon.matching;
 
+import static com.darshan.recon.JobMetadataCleanup.removeAllJobs;
 import static com.darshan.recon.matching.ReconcileJobTestSupport.canonicalBreaks;
 import static com.darshan.recon.matching.ReconcileJobTestSupport.partitionSteps;
 import static com.darshan.recon.matching.ReconcileJobTestSupport.reconRun;
@@ -61,7 +62,7 @@ class ReconcileScenarioTest {
 
     @BeforeEach
     void loadScenario() {
-        jobRepositoryTestUtils.removeJobExecutions();
+        removeAllJobs(jobRepositoryTestUtils, jdbcTemplate);
         jdbcTemplate.update("delete from recon_break");
         jdbcTemplate.update("delete from recon_run");
         jdbcTemplate.update("delete from statement_line");
