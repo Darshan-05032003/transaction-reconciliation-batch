@@ -1,5 +1,6 @@
 package com.darshan.recon.api;
 
+import static com.darshan.recon.JobMetadataCleanup.removeAllJobs;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 
@@ -70,7 +71,7 @@ abstract class ApiTestBase {
             users.upsert(APPROVER, hash, EnumSet.of(Role.APPROVER), now);
             users.upsert(OPERATOR_AND_APPROVER, hash, Set.of(Role.OPERATOR, Role.APPROVER), now);
         }
-        new JobRepositoryTestUtils(jobRepository).removeJobExecutions();
+        removeAllJobs(new JobRepositoryTestUtils(jobRepository), jdbcTemplate);
         jdbcTemplate.update("delete from recon_break_action");
         jdbcTemplate.update("delete from recon_break");
         jdbcTemplate.update("delete from recon_run");

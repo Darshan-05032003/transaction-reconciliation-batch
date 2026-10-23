@@ -1,5 +1,6 @@
 package com.darshan.recon.report;
 
+import static com.darshan.recon.JobMetadataCleanup.removeAllJobs;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.darshan.recon.TestcontainersConfiguration;
@@ -66,7 +67,7 @@ class BreakReportStepTest {
     @BeforeEach
     @AfterEach
     void startFromAnEmptyState() {
-        jobRepositoryTestUtils.removeJobExecutions();
+        removeAllJobs(jobRepositoryTestUtils, jdbcTemplate);
         jdbcTemplate.update("delete from recon_break_action");
         jdbcTemplate.update("delete from recon_break");
         jdbcTemplate.update("delete from recon_run");

@@ -1,5 +1,6 @@
 package com.darshan.recon.ingest;
 
+import static com.darshan.recon.JobMetadataCleanup.removeAllJobs;
 import static com.darshan.recon.ingest.IngestJobTestSupport.ingest;
 import static com.darshan.recon.ingest.IngestJobTestSupport.step;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -80,7 +81,7 @@ class IngestStatementJobTest {
     @BeforeEach
     void startFromAnEmptyState() {
         jobOperatorTestUtils.setJob(ingestStatementJob);
-        jobRepositoryTestUtils.removeJobExecutions();
+        removeAllJobs(jobRepositoryTestUtils, jdbcTemplate);
         jdbcTemplate.update("delete from recon_break_action");
         jdbcTemplate.update("delete from recon_break");
         jdbcTemplate.update("delete from recon_run");
