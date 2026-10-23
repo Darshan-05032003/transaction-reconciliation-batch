@@ -2,6 +2,11 @@ logging:
   level:
     com.darshan.recon: DEBUG
 
+management:
+  endpoint:
+    health:
+      show-details: always
+
 app:
   recon:
     folders:

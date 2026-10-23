@@ -43,6 +43,22 @@ logging:
   pattern:
     level: "%5p [%X{correlationId:-}]"
 
+management:
+  endpoints:
+    web:
+      exposure:
+        # health is open for scripts and the container health check; info and prometheus
+        # need a login; nothing else is reachable (see SecurityConfiguration).
+        include: health,info,prometheus
+  info:
+    java:
+      enabled: true
+    os:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
 app:
   recon:
     folders:

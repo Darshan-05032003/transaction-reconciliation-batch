@@ -12,4 +12,6 @@ logging:
 management:
   endpoint:
     health:
-      show-details: never
+      # Anonymous callers (scripts, the container health check) see the status only;
+      # a logged-in user also sees the db and data folder components.
+      show-details: when-authorized
