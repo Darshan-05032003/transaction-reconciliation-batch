@@ -57,7 +57,7 @@ docker compose exec app cat data/reports/recon_2026-10-01_1_summary.csv
 4. `run_recon.sh` ingests the file through the API, waits, reconciles it, waits again and prints the run summary: 939 matched, 71 breaks for this seed, which equals the generator's manifest.
 5. The summary and the break report are CSV files in the reports folder of the data volume; the same numbers are at `GET /api/v1/recon-runs/1/summary`.
 
-Then resolve a break as an operator (`PATCH /api/v1/breaks/{id}/resolve`, see the API section), and stop everything with `docker compose down -v`.
+Then list the breaks of the run (`GET /api/v1/recon-runs/1/breaks` as any user), resolve one as an operator (`PATCH /api/v1/breaks/{id}/resolve`, see the API section), and stop everything with `docker compose down -v`.
 
 To run the application on the host instead (for development): `docker compose up -d --wait postgres`, `set -a; source .env; set +a`, `./mvnw spring-boot:run`; the scripts then work against `http://localhost:8083` and `scripts/generate_data.sh -d 2026-10-01 -n 1000 -s 42` writes into `data/inbox/` on the host.
 
@@ -105,17 +105,18 @@ Next to the file the generator writes `<file>.manifest.json` with the exact coun
 
 ## Ingesting a statement file
 
-`ingestStatementJob` takes one job parameter, `filePath`, and runs three steps:
+`ingestStatementJob` takes one job parameter, `filePath`, and runs four steps:
 
 1. `computeChecksum` streams the file through SHA-256. If a `statement_file` row with that checksum already exists, the job ends with exit status `DUPLICATE` and changes nothing. Otherwise a row with status `RECEIVED` is inserted.
 2. `validateControlTotals` reads the file once, parses the header and the trailer and recomputes the control totals from the data records. On a mismatch the file is marked `REJECTED` with the reason, the job ends with exit status `REJECTED` and nothing is loaded. Otherwise the header fields and the declared count and total are stored on the `statement_file` row.
 3. `loadStatementLines` reads the data records in chunks of `RECON_CHUNK_SIZE`, parses and validates each one (required fields, decimal amount, ISO date, three-letter currency) and inserts them into `statement_line` with JDBC batches, one transaction per chunk. Records that cannot be parsed are skipped and appended to `data/error/<file>.errors.csv` with their line number, the reason and the raw line, up to `RECON_SKIP_LIMIT` per run; one more bad record fails the job and the file is marked `FAILED` with the reason. Transient database errors are retried three times.
+4. `analyzeStatementLines` runs `ANALYZE statement_line`, so that the reconcile job, which usually starts seconds later, is planned on fresh statistics instead of waiting for autovacuum (see the Performance section).
 
 When the job completes, the file is marked `VALIDATED` and one summary line is logged with the declared, read, written and skipped counts and the duration. A failed execution can be restarted and resumes after the last committed chunk. Launching the same `filePath` again is refused because that job instance already completed; the same content under another name ends with `DUPLICATE`. Nothing runs at boot (`spring.batch.job.enabled=false`); the job is started through the `JobOperator`.
 
 ## Reconciling a statement file
 
-`reconcileJob` takes the job parameter `statementFileId` (a file in status `VALIDATED`) and runs three steps:
+`reconcileJob` takes the job parameter `statementFileId` (a file in status `VALIDATED`) and runs five steps:
 
 1. `createReconRun` inserts a `recon_run` row linked to the job execution and derives the ledger window: all ledger transactions of the statement's account whose value date lies within `RECON_DATE_TOLERANCE_DAYS` of the statement date.
 2. `matchCandidates` is a partitioned step. The candidate pairs are built in SQL with a `FULL OUTER JOIN` between the statement lines of the file and the ledger transactions of the window on the normalised reference (trimmed, internal whitespace collapsed, upper-cased). A reference that appears more than once in the statement is collapsed to one candidate row that carries every line number. The rows are split into partitions by a hash of the normalised reference, so both sides of a pair always land in the same partition; each partition streams its rows through a `JdbcCursorItemReader`, classifies them with the matching rules and writes breaks to `recon_break` with JDBC batches, one transaction per chunk. The number of partitions defaults to `RECON_GRID_SIZE`, which is also the size of the thread pool, and can be overridden per run with the non-identifying parameter `gridSize`.
