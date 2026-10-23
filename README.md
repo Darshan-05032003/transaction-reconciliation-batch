@@ -1,19 +1,65 @@
 # transaction-reconciliation-batch
 
-Spring Batch application that reconciles daily bank statement files against the internal ledger, classifies the breaks and lets operations resolve them.
+[![CI](https://github.com/Darshan-05032003/transaction-reconciliation-batch/actions/workflows/ci.yml/badge.svg)](https://github.com/Darshan-05032003/transaction-reconciliation-batch/actions/workflows/ci.yml)
 
-## Running locally
+A Spring Batch application that reconciles the daily statement files a bank receives from other banks against its own ledger, classifies every difference, produces exception reports, lets an operations team resolve the differences with a maker/approver control, runs unattended at night and can be restarted after a failure without duplicating work.
 
-Requirements: Java 21 and Docker.
+## The problem
+
+Every transaction a bank books on a nostro or settlement account should also appear on the statement the counterparty bank sends for that account, with the same reference, the same amount and the same value date. Every night the two sides are compared; this is **reconciliation**. Anything that does not agree is a **break**: a payment the other bank never received, a charge we never booked, an amount that differs by a few paise because of a fee, a duplicate posting, or a value date that slipped over a weekend. Breaks are money the bank cannot explain yet, so each one is investigated and either resolved (it was a timing difference) or written off (a loss booked with approval). Regulators and auditors expect the bank to show, for every break, who decided what, when and why.
+
+The work is a batch problem: files with up to a million lines arrive in a window of a few hours, must be loaded exactly once, matched set-wise against the ledger, and reported before the morning shift starts. A file that fails half-way must resume where it stopped, never re-post what was already done.
+
+## How a file flows through the system
+
+```mermaid
+flowchart LR
+    A[Statement file arrives in data/inbox] --> B[ingestStatementJob]
+    subgraph B [ingestStatementJob]
+        B1[SHA-256 checksum<br/>duplicate check] --> B2[Validate header and<br/>trailer control totals] --> B3[Load lines in chunks<br/>skip and report bad lines]
+    end
+    B3 --> C[reconcileJob]
+    subgraph C [reconcileJob]
+        C1[Create recon_run] --> C2[Match in partitions<br/>FULL OUTER JOIN by reference] --> C3[Write breaks<br/>count matches] --> C4[Break report CSV<br/>and run summary]
+    end
+    C4 --> D[Operator resolves or writes off breaks<br/>maker and approver]
+    C4 --> E[File moved to data/archive/day<br/>or data/failed with a reason]
+```
+
+Rejected files (control totals do not match) and duplicates (same content already loaded) stop after the ingest checks and are moved to `data/failed/` with a `.reason` file; nothing of them is loaded.
+
+## Tech stack
+
+| Area | Choice |
+|---|---|
+| Language and runtime | Java 21, Spring Boot 4.1, Spring Batch 6.0 |
+| Database | PostgreSQL 16, Flyway migrations (application schema and the Spring Batch metadata tables), JDBC for batch and read paths, JPA only for the break resolution workflow |
+| Web | Spring MVC REST API, springdoc OpenAPI, Spring Security (HTTP Basic, roles from a user table), RFC 9457 problem details |
+| Observability | Spring Boot Actuator (health, info, Prometheus), Micrometer, ECS JSON logs in the prod profile |
+| Tests | JUnit 5, AssertJ, Mockito, Spring Batch test support, Testcontainers PostgreSQL, Awaitility, JaCoCo |
+| Operations | Bash scripts (ShellCheck in CI), cron, Docker multi-stage image, docker compose, GitHub Actions |
+
+## Run it end to end
+
+Requirements: Docker with compose. Java 21 is only needed to run the application or the scripts outside Docker.
 
 ```bash
 cp .env.example .env
-docker compose up -d
-set -a; source .env; set +a
-./mvnw spring-boot:run
+docker compose up --build -d --wait
+docker compose run --rm app --spring.profiles.active=generate --date=2026-10-01 --rows=1000 --seed=42
+RECON_API_PASSWORD=operator-dev scripts/run_recon.sh -f statement_BANK01_607867200891_2026-10-01.csv
+docker compose exec app cat data/reports/recon_2026-10-01_1_summary.csv
 ```
 
-The application starts with the `dev` profile on port 8083 and runs the Flyway migrations against the PostgreSQL container on port 5434. Exporting `.env` is what gives the dev profile its API users (see Security); without it the application starts with no users.
+1. `.env` holds every setting with working defaults, including the three dev users (`viewer`, `operator`, `approver`).
+2. `docker compose up` builds the image, starts PostgreSQL on host port 5434 and the application on 8083, and waits until both health checks pass; Flyway creates the schema on first start.
+3. The `generate` profile inserts 1,000 ledger transactions and writes the matching statement file with known breaks into the application's inbox volume (the seed decides the account number, so the file name is deterministic).
+4. `run_recon.sh` ingests the file through the API, waits, reconciles it, waits again and prints the run summary: 939 matched, 71 breaks for this seed, which equals the generator's manifest.
+5. The summary and the break report are CSV files in the reports folder of the data volume; the same numbers are at `GET /api/v1/recon-runs/1/summary`.
+
+Then resolve a break as an operator (`PATCH /api/v1/breaks/{id}/resolve`, see the API section), and stop everything with `docker compose down -v`.
+
+To run the application on the host instead (for development): `docker compose up -d --wait postgres`, `set -a; source .env; set +a`, `./mvnw spring-boot:run`; the scripts then work against `http://localhost:8083` and `scripts/generate_data.sh -d 2026-10-01 -n 1000 -s 42` writes into `data/inbox/` on the host.
 
 ## Configuration
 
@@ -47,7 +93,8 @@ Hand-made examples live in `src/test/resources/fixtures/`: a clean file, a file 
 The `generate` profile runs a one-shot command that inserts ledger transactions for a date and writes the matching statement file into the inbox folder, with deliberate breaks: amount differences in paise and in whole rupees, value dates shifted by one to three days, ledger transactions missing from the statement, statement lines with no ledger transaction, duplicated bank references, and malformed lines (bad amount, wrong column count, bad date). Malformed lines always use references that do not exist in the ledger, so skipping them during ingestion does not change the expected breaks.
 
 ```bash
-scripts/generate_data.sh -d 2026-10-01 -n 1000 -s 42
+scripts/generate_data.sh -d 2026-10-01 -n 1000 -s 42                                   # application running on the host
+docker compose run --rm app --spring.profiles.active=generate --date=2026-10-01 --rows=1000 --seed=42   # application in Docker
 ```
 
 The script builds the jar if `target/` has none (rebuild with `./mvnw -DskipTests package` after code changes), reads `DB_URL`, `DB_USERNAME` and `DB_PASSWORD` from the environment like the application, logs to stdout and `logs/generate_data.log`, and exits with 2 for bad arguments, 3 when Java 21 is missing, 4 when the build fails and 5 when generation fails. Without the script: `java -jar target/*.jar --spring.profiles.active=generate --date=2026-10-01 --rows=1000 --seed=42`.
@@ -137,9 +184,25 @@ Users live in the `app_user` table with BCrypt password hashes and one or more r
 | `OPERATOR` | launch, stop and restart jobs, resolve breaks and request write-offs |
 | `APPROVER` | approve or reject pending write-offs |
 
-Authentication is HTTP Basic over a stateless chain: no session, no cookie, CSRF disabled because there is no ambient credential for a cross-site request to reuse. `401` and `403` are problem details like every other error. `/actuator/health` is open so that scripts and the container health check can call it; everything else needs a login.
+Authentication is HTTP Basic over a stateless chain: no session, no cookie, CSRF disabled because there is no ambient credential for a cross-site request to reuse. `401` and `403` are problem details like every other error. `/actuator/health` is open so that scripts and the container health check can call it; `/actuator/info` and `/actuator/prometheus` need a login with any role; every other actuator endpoint is denied, and the OpenAPI documents need a login.
 
 Under the `dev` profile the users named in `.env` (`RECON_DEV_*`) are created or updated at startup with their passwords hashed. In other profiles insert users directly, for example with a hash from `htpasswd -nbBC 10 '' 'secret' | cut -d: -f2` stored as `{bcrypt}<hash>`.
+
+## Observability
+
+Actuator endpoints: `/actuator/health` (open; the `db` and `dataFolders` components are shown to a logged-in user in prod and always in dev), `/actuator/info` (build, Java and OS details; needs a login) and `/actuator/prometheus` (needs a login, any role). Everything else under `/actuator` is denied. `dataFolders` checks that every configured folder is, or can be created as, a writable directory and reports the usable space of the inbox's file system.
+
+Metrics, in Prometheus names:
+
+| Meter | Kind | Meaning |
+|---|---|---|
+| `spring_batch_job_seconds` (tag `spring_batch_job_name`), `spring_batch_step_seconds` (tag `spring_batch_step_name`) | timers | Spring Batch's own job and step durations, including one series per matching partition |
+| `recon_breaks_total` (tag `type`) | counter | breaks written by the reconcile job, per break type |
+| `recon_match_rate_percent` | gauge | match rate of the last completed run; `NaN` until a run has completed |
+| `files_rejected_total` | counter | statement files rejected by their control totals |
+| `hikaricp_connections_active`, `jvm_memory_used_bytes`, ... | standard | from Boot's auto-configuration; the Hikari gauges are what the Performance section used to size the pool |
+
+Logs: in `dev` the console is human-readable and every line shows the correlation id; in `prod` each line is one JSON object in Elastic Common Schema, with `correlationId`, `jobName` and `jobExecutionId` as fields on every line a job writes, including the lines written by the partition threads. The correlation id comes from the `X-Correlation-Id` request header (or is generated), is echoed in the response and in every problem detail, and the inbox poller creates one per file (`poll-<uuid>`). Each job ends with one summary line (counts and duration) from its listener.
 
 ## Operations
 
@@ -191,37 +254,14 @@ All scripts in `scripts/` use `set -euo pipefail`, `getopts`, a `usage()` (`-h`)
 The poller already picks up files on its own; cron is for the surrounding chores and for shops that prefer an explicit nightly run over polling. Percent signs must be escaped in a crontab.
 
 ```crontab
-# minute hour day month weekday  command
-*/5  *  *  *  *   cd /opt/recon && scripts/check_health.sh >/dev/null 2>&1 || logger -t recon "health check failed"
-30   1  *  *  *   cd /opt/recon && . /etc/recon/api.env && scripts/run_recon.sh -f "statement_BANK01_607867200891_$(date +\%F).csv" -b 500 >/dev/null 2>&1
-0    3  *  *  *   cd /opt/recon && scripts/archive_old.sh -d 30 >/dev/null 2>&1
-```
 
-`/etc/recon/api.env` exports `RECON_API_URL`, `RECON_API_USER` and `RECON_API_PASSWORD` and is readable by the cron user only. The scripts' own log files under `logs/` keep the details; the redirects keep cron mail quiet.
+### Running in Docker
 
-### Restarting a failed execution
+The `Dockerfile` builds in two stages: a JDK stage runs the Maven wrapper (dependencies are resolved in their own layer and cached between builds) and extracts the Boot jar into layers; the runtime stage is `eclipse-temurin:21-jre` with the dependency, loader, snapshot and application layers copied separately, so a code change rebuilds only the last and smallest layer. The application runs as the non-root user `recon` (uid 10001), with `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError` so the heap follows the container memory limit (1 GB in `docker-compose.yml`), and a `HEALTHCHECK` on `/actuator/health`.
 
-A failed execution keeps every chunk that was committed. `POST /api/v1/jobs/executions/{id}/restart` creates a new execution of the same job instance that skips the completed steps and resumes the failed ones after their last commit; for the partitioned matching step only the partitions that did not complete run again, each from its own saved position, and the run keeps its id. The execution id is in the `.reason` file, in the script log and in `batch_job_execution`.
+All five data folders live under one volume, `/app/data` (`recon-data` in compose), which keeps the inbox, archive and failed folders on one file system for the atomic moves. To hand a real file to the containerised application: `docker compose cp statement.csv app:/app/data/inbox/`; the poller picks it up, or `scripts/run_recon.sh -f statement.csv` runs it at once. Reports and error files are read the same way (`docker compose exec app ls data/reports`, `docker compose cp app:/app/data/reports ./reports`). `docker compose logs -f app` follows the application log; `docker compose down -v` removes the containers and both volumes.
 
-```bash
-curl -u operator -X POST localhost:8083/api/v1/jobs/executions/42/restart
-curl -u viewer localhost:8083/api/v1/jobs/executions/43
-```
-
-A failed `ingestStatementJob` reads the file again from the path it was launched with, so move the file from `data/failed/` back to the inbox before restarting; the poller leaves it alone for one poll interval, which is the window to issue the restart. A failed `reconcileJob` does not need the file.
-
-### Troubleshooting a failed nightly run
-
-1. Is the application up? `scripts/check_health.sh`; if not, check the database (`docker compose ps`, `docker compose logs postgres`) and the application log.
-2. Is the file still in `data/inbox/`? Then it was never picked up: it does not end in `.csv`, it is still changing size, it is not readable by the application user, or polling is disabled (`RECON_POLL_CRON=-`). The application log says `Inbox poll handled n file(s)` on every poll that found something.
-3. Is it in `data/failed/`? Read `<file>.reason`:
-   - `REJECTED`: the trailer does not match the data records; ask the counterparty for a corrected file. Nothing was loaded.
-   - `DUPLICATE`: the content was already processed as the `statement_file` named in the reason; nothing to do unless the earlier run itself failed.
-   - `FAILED` during ingest with `Skip limit of 'n' exceeded`: more malformed lines than `RECON_SKIP_LIMIT`; the skipped lines and reasons are in `data/error/<file>.errors.csv`. Fix the file or the limit, then move the file back and restart, or re-send a corrected file.
-   - `FAILED` for any other reason (database unavailable, disk full): fix the cause and restart the execution as described above; no data is duplicated by a restart.
-4. Is it in `data/archive/<date>/`? Then both jobs completed; look at the run with `GET /api/v1/recon-runs/{id}/summary` and the report in `data/reports/`. A high break count usually means the ledger for that day was not posted yet or the wrong date window; the breaks list which side is missing.
-5. `run_recon.sh` exit codes tell the same story without reading files: 7 duplicate, 8 rejected, 5 a job failed (the log shows the restart command), 6 the job did not finish in time (it is still running; poll the execution), 9 the run completed but has more breaks than allowed.
-6. `AtomicMoveNotSupportedException` in the log means the inbox and the archive or failed folder are on different file systems; keep `data/` on one volume.
+CI (`.github/workflows/ci.yml`) runs `./mvnw -B clean verify`, keeps the JaCoCo report as a build artifact, lints the scripts with ShellCheck and builds the Docker image.
 
 ## Performance
 
@@ -270,4 +310,6 @@ Results are written as CSV to `data/benchmark/` (ignored by git), one row per jo
 ./mvnw -B clean verify
 ```
 
-Integration tests start a disposable PostgreSQL 16 with Testcontainers, so Docker must be running.
+Integration tests start a disposable PostgreSQL 16 with Testcontainers, so Docker must be running. The suite has 309 tests: unit tests for the matching rules, the file format, the resolution state machine and the scripts' API counterparts, Spring Batch tests for each job (including a restart after an injected mid-run failure), MockMvc tests for every endpoint and role with real users and HTTP Basic, and a poller test with temp folders.
+
+JaCoCo writes `target/site/jacoco/index.html` on every `verify`. Measured on this suite: 97.04% line coverage (1,576 of 1,624 lines), 88.96% branch coverage, after excluding the application entry point, Spring `*Configuration` classes and data-only records (listed in `pom.xml`). The build fails below 95% line coverage, which is the measured number rounded down to the nearest 5%; raise the threshold in `pom.xml` when coverage goes up, never lower it to make a build pass.
