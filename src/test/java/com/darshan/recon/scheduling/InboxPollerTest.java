@@ -1,5 +1,6 @@
 package com.darshan.recon.scheduling;
 
+import static com.darshan.recon.JobMetadataCleanup.removeAllJobs;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -76,7 +77,7 @@ class InboxPollerTest {
 
     @BeforeEach
     void startFromAnEmptyState() {
-        jobRepositoryTestUtils.removeJobExecutions();
+        removeAllJobs(jobRepositoryTestUtils, jdbcTemplate);
         jdbcTemplate.update("delete from recon_break");
         jdbcTemplate.update("delete from recon_run");
         jdbcTemplate.update("delete from statement_line");

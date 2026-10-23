@@ -1,5 +1,6 @@
 package com.darshan.recon.matching;
 
+import static com.darshan.recon.JobMetadataCleanup.removeAllJobs;
 import static com.darshan.recon.matching.ReconcileJobTestSupport.breakCountsByType;
 import static com.darshan.recon.matching.ReconcileJobTestSupport.canonicalBreaks;
 import static com.darshan.recon.matching.ReconcileJobTestSupport.ingest;
@@ -91,7 +92,7 @@ class ReconcileJobTest {
 
     @BeforeEach
     void startFromAnEmptyState() {
-        jobRepositoryTestUtils.removeJobExecutions();
+        removeAllJobs(jobRepositoryTestUtils, jdbcTemplate);
         jdbcTemplate.update("delete from recon_break");
         jdbcTemplate.update("delete from recon_run");
         jdbcTemplate.update("delete from statement_line");
@@ -211,7 +212,7 @@ class ReconcileJobTest {
         assertThatThrownBy(() -> reconcile(jobOperatorTestUtils, reconcileJob, reconcileParameters(fileId)))
                 .isInstanceOf(JobInstanceAlreadyCompleteException.class);
 
-        jobRepositoryTestUtils.removeJobExecutions();
+        removeAllJobs(jobRepositoryTestUtils, jdbcTemplate);
         assertThatThrownBy(() -> reconcile(jobOperatorTestUtils, reconcileJob, reconcileParameters(fileId)))
                 .isInstanceOf(InvalidJobParametersException.class)
                 .hasMessageContaining("already RECONCILED");
