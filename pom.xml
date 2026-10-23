@@ -20,6 +20,10 @@
         <java.version>21</java.version>
         <springdoc.version>3.1.1</springdoc.version>
         <jacoco.version>0.8.15</jacoco.version>
+        <!-- Surefire's default order is whatever the file system returns, which differs between a
+             laptop and the CI runner; a fixed order makes a CI failure reproducible. The property can
+             still be overridden on the command line, e.g. -Dsurefire.runOrder=reversealphabetical. -->
+        <surefire.runOrder>alphabetical</surefire.runOrder>
         <!-- Line coverage actually reached by the test suite, rounded down to the nearest 5%; the build
              fails below it so that coverage can only go up without a conscious change here. -->
         <jacoco.minimum-line-coverage>0.95</jacoco.minimum-line-coverage>
@@ -160,6 +164,7 @@
                 <configuration>
                     <!-- @{argLine} is the JaCoCo agent; both agents must be on the command line. -->
                     <argLine>@{argLine} -javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
+                    <runOrder>${surefire.runOrder}</runOrder>
                 </configuration>
             </plugin>
             <plugin>
