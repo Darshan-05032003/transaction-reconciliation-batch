@@ -1,6 +1,7 @@
 package com.darshan.recon.ingest;
 
 import com.darshan.recon.common.batch.AnalyzeTableTasklet;
+import com.darshan.recon.common.batch.JobExecutionMdcListener;
 import com.darshan.recon.common.config.ReconProperties;
 import com.darshan.recon.common.observability.ReconMetrics;
 import com.darshan.recon.ingest.file.MalformedRecordException;
@@ -67,10 +68,12 @@ public class IngestJobConfiguration {
     @Bean
     public Job ingestStatementJob(Step computeChecksumStep, Step validateControlTotalsStep,
                                   Step loadStatementLinesStep, Step analyzeStatementLinesStep,
+                                  JobExecutionMdcListener jobExecutionMdcListener,
                                   IngestJobListener ingestJobListener) {
         String completed = ExitStatus.COMPLETED.getExitCode();
         return new JobBuilder(IngestJobKeys.JOB_NAME, jobRepository)
                 .validator(new StatementFilePathValidator())
+                .listener(jobExecutionMdcListener)
                 .listener(ingestJobListener)
                 .start(computeChecksumStep)
                     .on(IngestJobKeys.EXIT_DUPLICATE).end(IngestJobKeys.EXIT_DUPLICATE)

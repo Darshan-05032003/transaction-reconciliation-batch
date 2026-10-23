@@ -1,5 +1,7 @@
 package com.darshan.recon.matching;
 
+import com.darshan.recon.common.batch.JobExecutionMdcListener;
+import com.darshan.recon.common.batch.MdcTaskDecorator;
 import com.darshan.recon.common.config.ReconProperties;
 import com.darshan.recon.common.observability.ReconMetrics;
 import com.darshan.recon.ingest.StatementFileRepository;
@@ -55,10 +57,12 @@ public class ReconcileJobConfiguration {
     @Bean
     public Job reconcileJob(Step createReconRunStep, Step matchCandidatesStep, Step finaliseReconRunStep,
                             Step writeBreakReportStep, Step writeRunSummaryStep,
+                            JobExecutionMdcListener jobExecutionMdcListener,
                             ReconcileJobListener reconcileJobListener,
                             ReconcileJobParametersValidator reconcileJobParametersValidator) {
         return new JobBuilder(ReconcileJobKeys.JOB_NAME, jobRepository)
                 .validator(reconcileJobParametersValidator)
+                .listener(jobExecutionMdcListener)
                 .listener(reconcileJobListener)
                 .start(createReconRunStep)
                 .next(matchCandidatesStep)
@@ -114,6 +118,7 @@ public class ReconcileJobConfiguration {
         executor.setCorePoolSize(properties.gridSize());
         executor.setMaxPoolSize(properties.gridSize());
         executor.setThreadNamePrefix("recon-match-");
+        executor.setTaskDecorator(new MdcTaskDecorator());
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(EXECUTOR_SHUTDOWN_WAIT_SECONDS);
         return executor;
