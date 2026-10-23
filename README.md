@@ -254,6 +254,38 @@ All scripts in `scripts/` use `set -euo pipefail`, `getopts`, a `usage()` (`-h`)
 The poller already picks up files on its own; cron is for the surrounding chores and for shops that prefer an explicit nightly run over polling. Percent signs must be escaped in a crontab.
 
 ```crontab
+# minute hour day month weekday  command
+*/5  *  *  *  *   cd /opt/recon && scripts/check_health.sh >/dev/null 2>&1 || logger -t recon "health check failed"
+30   1  *  *  *   cd /opt/recon && . /etc/recon/api.env && scripts/run_recon.sh -f "statement_BANK01_607867200891_$(date +\%F).csv" -b 500 >/dev/null 2>&1
+0    3  *  *  *   cd /opt/recon && scripts/archive_old.sh -d 30 >/dev/null 2>&1
+```
+
+`/etc/recon/api.env` exports `RECON_API_URL`, `RECON_API_USER` and `RECON_API_PASSWORD` and is readable by the cron user only. The scripts' own log files under `logs/` keep the details; the redirects keep cron mail quiet. Run either the poller or the nightly `run_recon.sh` line for a given inbox, not both: the script does not move files, so the poller would pick the same file up later and move it to `data/failed/` as a `DUPLICATE`.
+
+### Restarting a failed execution
+
+A failed execution keeps every chunk that was committed. `POST /api/v1/jobs/executions/{id}/restart` creates a new execution of the same job instance that skips the completed steps and resumes the failed ones after their last commit; for the partitioned matching step only the partitions that did not complete run again, each from its own saved position, and the run keeps its id. The execution id is in the `.reason` file, in the script log and in `batch_job_execution`.
+
+```bash
+curl -u operator -X POST localhost:8083/api/v1/jobs/executions/42/restart
+curl -u viewer localhost:8083/api/v1/jobs/executions/43
+```
+
+A failed `ingestStatementJob` reads the file again from the path it was launched with, so move the file from `data/failed/` back to the inbox before restarting; the poller leaves it alone for one poll interval, which is the window to issue the restart. A failed `reconcileJob` does not need the file.
+
+### Troubleshooting a failed nightly run
+
+1. Is the application up? `scripts/check_health.sh`; if not, check the database (`docker compose ps`, `docker compose logs postgres`) and the application log.
+2. Is the file still in `data/inbox/`? Then it was never picked up: it does not end in `.csv`, it is still changing size, it is not readable by the application user, or polling is disabled (`RECON_POLL_CRON=-`). The application log says `Inbox poll handled n file(s)` on every poll that found something.
+3. Is it in `data/failed/`? Read `<file>.reason`:
+   - `REJECTED`: the trailer does not match the data records; ask the counterparty for a corrected file. Nothing was loaded.
+   - `DUPLICATE`: the content was already processed as the `statement_file` named in the reason; nothing to do unless the earlier run itself failed.
+   - `FAILED` during ingest with `Skip limit of 'n' exceeded`: more malformed lines than `RECON_SKIP_LIMIT`; the skipped lines and reasons are in `data/error/<file>.errors.csv`. Fix the file or the limit, then move the file back and restart, or re-send a corrected file.
+   - `FAILED` for any other reason (database unavailable, disk full): fix the cause and restart the execution as described above; no data is duplicated by a restart.
+4. Is it in `data/archive/<date>/`? Then both jobs completed; look at the run with `GET /api/v1/recon-runs/{id}/summary` and the report in `data/reports/`. A high break count usually means the ledger for that day was not posted yet or the wrong date window; the breaks list which side is missing.
+5. `run_recon.sh` exit codes tell the same story without reading files: 7 duplicate, 8 rejected, 5 a job failed (the log shows the restart command), 6 the job did not finish in time (it is still running; poll the execution), 9 the run completed but has more breaks than allowed.
+6. `AtomicMoveNotSupportedException` in the log means the inbox and the archive or failed folder are on different file systems; keep `data/` on one volume.
+7. The application refuses to start with a message naming `DB_POOL_SIZE` and `RECON_GRID_SIZE` when the connection pool is smaller than `2 * RECON_GRID_SIZE + 2`; raise the pool or lower the grid size.
 
 ### Running in Docker
 
