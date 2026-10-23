@@ -39,3 +39,11 @@ jobs:
             exit 0
           fi
           find scripts -name '*.sh' -print0 | xargs -0 --no-run-if-empty shellcheck --severity=style
+
+  docker-image:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the image
+        run: docker build --tag transaction-reconciliation-batch:ci .

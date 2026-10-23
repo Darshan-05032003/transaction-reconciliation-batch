@@ -1,0 +1,7 @@
+# Only what the Maven build needs goes into the build context; everything else would
+# invalidate the dependency layer for no reason or leak local files into the image.
+*
+!.mvn/
+!mvnw
+!pom.xml
+!src/
