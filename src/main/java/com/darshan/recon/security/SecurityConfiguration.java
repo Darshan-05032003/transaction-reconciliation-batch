@@ -42,6 +42,8 @@ public class SecurityConfiguration {
                         .accessDeniedHandler(problemHandler))
                 .authorizeHttpRequests(requests -> requests
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        .requestMatchers("/actuator/info", "/actuator/prometheus").authenticated()
+                        .requestMatchers("/actuator/**").denyAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/**").hasAnyRole(VIEWER, OPERATOR, APPROVER)
                         .requestMatchers(HttpMethod.POST, "/api/v1/jobs/**").hasRole(OPERATOR)
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/breaks/*/resolve").hasRole(OPERATOR)

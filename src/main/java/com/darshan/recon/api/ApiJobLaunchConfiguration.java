@@ -1,9 +1,8 @@
 package com.darshan.recon.api;
 
+import com.darshan.recon.common.batch.MdcTaskDecorator;
 import io.micrometer.observation.ObservationRegistry;
 import java.util.List;
-import java.util.Map;
-import org.slf4j.MDC;
 import org.springframework.batch.core.configuration.DuplicateJobException;
 import org.springframework.batch.core.configuration.support.MapJobRegistry;
 import org.springframework.batch.core.job.Job;
@@ -14,7 +13,6 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.task.TaskDecorator;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -37,7 +35,7 @@ public class ApiJobLaunchConfiguration {
         executor.setMaxPoolSize(LAUNCH_THREADS);
         executor.setQueueCapacity(LAUNCH_QUEUE_CAPACITY);
         executor.setThreadNamePrefix("recon-api-launch-");
-        executor.setTaskDecorator(correlationIdPropagation());
+        executor.setTaskDecorator(new MdcTaskDecorator());
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(SHUTDOWN_WAIT_SECONDS);
         return executor;
@@ -65,23 +63,5 @@ public class ApiJobLaunchConfiguration {
         observationRegistry.ifAvailable(factory::setObservationRegistry);
         factory.afterPropertiesSet();
         return factory.getObject();
-    }
-
-    // MDC is thread-local; copying it into the launch thread keeps the request's correlation
-    // id on every log line the job writes.
-    private static TaskDecorator correlationIdPropagation() {
-        return task -> {
-            Map<String, String> context = MDC.getCopyOfContextMap();
-            return () -> {
-                if (context != null) {
-                    MDC.setContextMap(context);
-                }
-                try {
-                    task.run();
-                } finally {
-                    MDC.clear();
-                }
-            };
-        };
     }
 }

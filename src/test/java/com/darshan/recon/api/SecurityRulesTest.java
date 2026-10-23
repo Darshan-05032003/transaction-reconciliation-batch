@@ -56,7 +56,11 @@ class SecurityRulesTest extends ApiTestBase {
                 Arguments.of("POST", "/api/v1/breaks/999/reject", OPERATOR, 403),
                 Arguments.of("POST", "/api/v1/breaks/999/reject", APPROVER, 404),
                 Arguments.of("DELETE", "/api/v1/breaks/999", APPROVER, 403),
-                Arguments.of("GET", "/api/v2/anything", APPROVER, 403));
+                Arguments.of("GET", "/api/v2/anything", APPROVER, 403),
+                Arguments.of("GET", "/actuator/info", VIEWER, 200),
+                Arguments.of("GET", "/actuator/prometheus", APPROVER, 200),
+                Arguments.of("GET", "/actuator/env", VIEWER, 403),
+                Arguments.of("GET", "/actuator/metrics", OPERATOR, 403));
     }
 
     @ParameterizedTest(name = "{0} {1} as {2} -> {3}")
@@ -82,7 +86,8 @@ class SecurityRulesTest extends ApiTestBase {
                 Arguments.of("PATCH", "/api/v1/breaks/1/resolve"),
                 Arguments.of("GET", "/v3/api-docs"),
                 Arguments.of("GET", "/swagger-ui/index.html"),
-                Arguments.of("GET", "/actuator/info"));
+                Arguments.of("GET", "/actuator/info"),
+                Arguments.of("GET", "/actuator/prometheus"));
     }
 
     @ParameterizedTest(name = "{0} {1} anonymous -> 401")
@@ -119,8 +124,40 @@ class SecurityRulesTest extends ApiTestBase {
     }
 
     @Test
-    void healthStaysOpenForScripts() {
-        assertThat(mvc.get().uri("/actuator/health").exchange()).hasStatusOk();
+    void healthStaysOpenForScriptsAndReportsTheDatabaseAndTheDataFolders() {
+        MvcTestResult result = mvc.get().uri("/actuator/health").exchange();
+
+        assertThat(result).hasStatusOk();
+        assertThat(result).bodyJson()
+                .hasPathSatisfying("$.status", s -> s.assertThat().isEqualTo("UP"))
+                .hasPathSatisfying("$.components.db.status", s -> s.assertThat().isEqualTo("UP"))
+                .hasPathSatisfying("$.components.dataFolders.status", s -> s.assertThat().isEqualTo("UP"))
+                .hasPathSatisfying("$.components.dataFolders.details.inbox",
+                        i -> i.assertThat().asString().contains("recon-test"));
+    }
+
+    @Test
+    void infoShowsTheBuildAndTheRuntime() {
+        MvcTestResult result = mvc.get().uri("/actuator/info").with(as(VIEWER)).exchange();
+
+        assertThat(result).hasStatusOk();
+        assertThat(result).bodyJson()
+                .hasPathSatisfying("$.build.artifact", a -> a.assertThat().isEqualTo("transaction-reconciliation-batch"))
+                .hasPathSatisfying("$.build.version", v -> v.assertThat().asString().isNotBlank())
+                .hasPathSatisfying("$.java.version", v -> v.assertThat().asString().startsWith("21"));
+    }
+
+    @Test
+    void prometheusScrapeListsTheReconciliationMetersFromTheStart() {
+        MvcTestResult result = mvc.get().uri("/actuator/prometheus").with(as(VIEWER)).exchange();
+
+        assertThat(result).hasStatusOk();
+        assertThat(result).bodyText()
+                .contains("recon_breaks_total{")
+                .contains("type=\"AMOUNT_MISMATCH\"")
+                .contains("files_rejected_total")
+                .contains("recon_match_rate_percent")
+                .contains("application=\"transaction-reconciliation-batch\"");
     }
 
     @Test

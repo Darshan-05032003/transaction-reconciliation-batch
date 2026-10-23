@@ -1,5 +1,6 @@
 package com.darshan.recon.ingest;
 
+import com.darshan.recon.common.observability.ReconMetrics;
 import com.darshan.recon.ingest.file.FileValidation.Accepted;
 import com.darshan.recon.ingest.file.FileValidation.Rejected;
 import com.darshan.recon.ingest.file.FileValidator;
@@ -23,13 +24,15 @@ public class ValidateFileTasklet implements Tasklet {
     private final long statementFileId;
     private final FileValidator validator;
     private final StatementFileRepository statementFiles;
+    private final ReconMetrics metrics;
 
     public ValidateFileTasklet(Path file, long statementFileId, FileValidator validator,
-                               StatementFileRepository statementFiles) {
+                               StatementFileRepository statementFiles, ReconMetrics metrics) {
         this.file = file;
         this.statementFileId = statementFileId;
         this.validator = validator;
         this.statementFiles = statementFiles;
+        this.metrics = metrics;
     }
 
     @Override
@@ -53,6 +56,7 @@ public class ValidateFileTasklet implements Tasklet {
 
     private void reject(Rejected rejected, StepContribution contribution) {
         statementFiles.markRejected(statementFileId, rejected.reason());
+        metrics.fileRejected();
         contribution.setExitStatus(new ExitStatus(IngestJobKeys.EXIT_REJECTED, rejected.reason()));
         log.warn("statement_file {} rejected: {}", statementFileId, rejected.reason());
     }

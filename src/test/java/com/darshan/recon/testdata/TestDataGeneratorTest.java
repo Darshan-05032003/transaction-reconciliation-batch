@@ -1,6 +1,7 @@
 package com.darshan.recon.testdata;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.darshan.recon.TestcontainersConfiguration;
 import com.darshan.recon.ingest.file.ControlTotals;
@@ -10,6 +11,7 @@ import com.darshan.recon.ingest.file.StatementHeader;
 import com.darshan.recon.ingest.file.StatementRecordFormat;
 import com.darshan.recon.ingest.file.StatementTrailer;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,6 +19,7 @@ import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -96,6 +99,19 @@ class TestDataGeneratorTest {
         assertThat(reread).isEqualTo(manifest);
         assertThat(manifestFile.getFileName().toString()).isEqualTo(
                 "statement_BANK01_" + manifest.accountNumber() + "_2026-10-01.manifest.json");
+    }
+
+    @Test
+    void anUnusableTargetFolderFailsWithoutLedgerRowsOrAPartFile() throws IOException {
+        Path notAFolder = Files.writeString(inbox.resolve("not-a-folder"), "x");
+        GenerationRequest request = new GenerationRequest(DATE, 20, 11L);
+
+        assertThatThrownBy(() -> generator.generate(request, notAFolder.resolve("inbox")))
+                .isInstanceOf(UncheckedIOException.class)
+                .hasMessageStartingWith("Could not write statement file");
+
+        String account = String.format("%012d", new Random(11L).nextLong(0, 1_000_000_000_000L));
+        assertThat(ledgerRowCount(account)).isZero();
     }
 
     @Test

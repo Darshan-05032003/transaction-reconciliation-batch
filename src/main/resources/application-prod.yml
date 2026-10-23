@@ -8,8 +8,19 @@ logging:
   level:
     root: INFO
     com.darshan.recon: INFO
+  # One JSON object per line (Elastic Common Schema) for a log shipper; MDC entries such as
+  # correlationId, jobName and jobExecutionId become top-level fields.
+  structured:
+    format:
+      console: ecs
+    ecs:
+      service:
+        name: ${spring.application.name}
+        environment: prod
 
 management:
   endpoint:
     health:
-      show-details: never
+      # Anonymous callers (scripts, the container health check) see the status only;
+      # a logged-in user also sees the db and data folder components.
+      show-details: when-authorized

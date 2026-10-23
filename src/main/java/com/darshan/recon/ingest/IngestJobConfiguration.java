@@ -1,7 +1,9 @@
 package com.darshan.recon.ingest;
 
 import com.darshan.recon.common.batch.AnalyzeTableTasklet;
+import com.darshan.recon.common.batch.JobExecutionMdcListener;
 import com.darshan.recon.common.config.ReconProperties;
+import com.darshan.recon.common.observability.ReconMetrics;
 import com.darshan.recon.ingest.file.MalformedRecordException;
 import com.darshan.recon.ingest.file.StatementFileValidator;
 import com.darshan.recon.ingest.file.StatementRecordFormat;
@@ -66,10 +68,12 @@ public class IngestJobConfiguration {
     @Bean
     public Job ingestStatementJob(Step computeChecksumStep, Step validateControlTotalsStep,
                                   Step loadStatementLinesStep, Step analyzeStatementLinesStep,
+                                  JobExecutionMdcListener jobExecutionMdcListener,
                                   IngestJobListener ingestJobListener) {
         String completed = ExitStatus.COMPLETED.getExitCode();
         return new JobBuilder(IngestJobKeys.JOB_NAME, jobRepository)
                 .validator(new StatementFilePathValidator())
+                .listener(jobExecutionMdcListener)
                 .listener(ingestJobListener)
                 .start(computeChecksumStep)
                     .on(IngestJobKeys.EXIT_DUPLICATE).end(IngestJobKeys.EXIT_DUPLICATE)
@@ -107,8 +111,8 @@ public class IngestJobConfiguration {
     public ValidateFileTasklet validateFileTasklet(@Value("#{jobParameters['filePath']}") String filePath,
                                                    @Value("#{jobExecutionContext['statementFileId']}") Long statementFileId,
                                                    StatementFileValidator validator,
-                                                   StatementFileRepository statementFiles) {
-        return new ValidateFileTasklet(Path.of(filePath), statementFileId, validator, statementFiles);
+                                                   StatementFileRepository statementFiles, ReconMetrics metrics) {
+        return new ValidateFileTasklet(Path.of(filePath), statementFileId, validator, statementFiles, metrics);
     }
 
     @Bean

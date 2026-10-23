@@ -15,5 +15,36 @@ services:
       timeout: 3s
       retries: 10
 
+  app:
+    build: .
+    image: transaction-reconciliation-batch:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # .env (copied from .env.example) supplies the profile, the tuning and the dev users;
+    # the entries below override what differs inside the container network.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-recon}
+      DB_USERNAME: ${DB_USERNAME:-recon}
+      DB_PASSWORD: ${DB_PASSWORD:-recon}
+      SERVER_PORT: 8083
+      RECON_INBOX_DIR: /app/data/inbox
+      RECON_ARCHIVE_DIR: /app/data/archive
+      RECON_FAILED_DIR: /app/data/failed
+      RECON_ERROR_DIR: /app/data/error
+      RECON_REPORTS_DIR: /app/data/reports
+    ports:
+      - "8083:8083"
+    volumes:
+      - recon-data:/app/data
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
 volumes:
   recon-pgdata:
+  recon-data:

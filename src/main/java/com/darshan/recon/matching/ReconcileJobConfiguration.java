@@ -1,6 +1,9 @@
 package com.darshan.recon.matching;
 
+import com.darshan.recon.common.batch.JobExecutionMdcListener;
+import com.darshan.recon.common.batch.MdcTaskDecorator;
 import com.darshan.recon.common.config.ReconProperties;
+import com.darshan.recon.common.observability.ReconMetrics;
 import com.darshan.recon.ingest.StatementFileRepository;
 import com.darshan.recon.matching.engine.CandidatePair;
 import com.darshan.recon.matching.engine.MatchingEngine;
@@ -54,10 +57,12 @@ public class ReconcileJobConfiguration {
     @Bean
     public Job reconcileJob(Step createReconRunStep, Step matchCandidatesStep, Step finaliseReconRunStep,
                             Step writeBreakReportStep, Step writeRunSummaryStep,
+                            JobExecutionMdcListener jobExecutionMdcListener,
                             ReconcileJobListener reconcileJobListener,
                             ReconcileJobParametersValidator reconcileJobParametersValidator) {
         return new JobBuilder(ReconcileJobKeys.JOB_NAME, jobRepository)
                 .validator(reconcileJobParametersValidator)
+                .listener(jobExecutionMdcListener)
                 .listener(reconcileJobListener)
                 .start(createReconRunStep)
                 .next(matchCandidatesStep)
@@ -113,6 +118,7 @@ public class ReconcileJobConfiguration {
         executor.setCorePoolSize(properties.gridSize());
         executor.setMaxPoolSize(properties.gridSize());
         executor.setThreadNamePrefix("recon-match-");
+        executor.setTaskDecorator(new MdcTaskDecorator());
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(EXECUTOR_SHUTDOWN_WAIT_SECONDS);
         return executor;
@@ -121,13 +127,15 @@ public class ReconcileJobConfiguration {
     @Bean
     public Step matchPartitionStep(JdbcCursorItemReader<CandidatePair> candidatePairReader,
                                    MatchingItemProcessor matchingItemProcessor,
-                                   JdbcBatchItemWriter<ReconBreakRow> reconBreakWriter) {
+                                   JdbcBatchItemWriter<ReconBreakRow> reconBreakWriter,
+                                   BreakMetricsListener breakMetricsListener) {
         return new StepBuilder(ReconcileJobKeys.PARTITION_STEP, jobRepository)
                 .<CandidatePair, ReconBreakRow>chunk(properties.chunkSize())
                 .transactionManager(transactionManager)
                 .reader(candidatePairReader)
                 .processor(matchingItemProcessor)
                 .writer(reconBreakWriter)
+                .listener(breakMetricsListener)
                 .faultTolerant()
                 .retry(TransientDataAccessException.class, CannotGetJdbcConnectionException.class)
                 .retryLimit(TRANSIENT_RETRY_LIMIT)
@@ -202,8 +210,8 @@ public class ReconcileJobConfiguration {
             @Value("#{jobExecutionContext['accountNumber']}") String accountNumber,
             @Value("#{jobExecutionContext['windowFrom']}") String windowFrom,
             @Value("#{jobExecutionContext['windowTo']}") String windowTo,
-            ReconRunRepository reconRuns, StatementFileRepository statementFiles, Clock clock) {
+            ReconRunRepository reconRuns, StatementFileRepository statementFiles, ReconMetrics metrics, Clock clock) {
         return new FinaliseReconRunTasklet(reconRunId, statementFileId, accountNumber,
-                ReconWindow.parse(windowFrom, windowTo), reconRuns, statementFiles, clock);
+                ReconWindow.parse(windowFrom, windowTo), reconRuns, statementFiles, metrics, clock);
     }
 }

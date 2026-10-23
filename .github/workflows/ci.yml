@@ -19,6 +19,13 @@ jobs:
           cache: maven
       - name: Build and run tests
         run: ./mvnw -B clean verify
+      - name: Keep the coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jacoco-report
+          path: target/site/jacoco
+          if-no-files-found: ignore
 
   shellcheck:
     name: ShellCheck
@@ -32,3 +39,11 @@ jobs:
             exit 0
           fi
           find scripts -name '*.sh' -print0 | xargs -0 --no-run-if-empty shellcheck --severity=style
+
+  docker-image:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the image
+        run: docker build --tag transaction-reconciliation-batch:ci .

@@ -174,8 +174,8 @@ public class InboxPoller {
         } catch (Exception e) {
             log.error("Could not launch {} for statement_file {}", ReconcileJobKeys.JOB_NAME, statementFileId, e);
             return failed(file, "FAILED", ingest, statementFileId,
-                    "ingested as statement_file %d but reconciliation could not be launched: %s; start it with "
-                            + "POST /api/v1/jobs/reconcile/%d".formatted(statementFileId, e.getMessage(), statementFileId));
+                    ("ingested as statement_file %d but reconciliation could not be launched: %s; start it with "
+                            + "POST /api/v1/jobs/reconcile/%d").formatted(statementFileId, e.getMessage(), statementFileId));
         }
         if (reconcile.getStatus() != BatchStatus.COMPLETED) {
             return failed(file, "FAILED", reconcile, statementFileId,

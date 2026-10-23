@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.darshan.recon.TestcontainersConfiguration;
 import com.darshan.recon.common.config.ReconProperties;
+import com.darshan.recon.common.observability.ReconMetrics;
 import com.darshan.recon.testdata.GenerationManifest;
 import com.darshan.recon.testdata.GenerationRequest;
 import com.darshan.recon.testdata.TestDataGenerator;
@@ -34,6 +35,7 @@ import org.springframework.batch.core.step.StepExecution;
 import org.springframework.batch.test.JobOperatorTestUtils;
 import org.springframework.batch.test.JobRepositoryTestUtils;
 import org.springframework.batch.test.context.SpringBatchTest;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -68,6 +70,9 @@ class IngestStatementJobTest {
 
     @Autowired
     private TestDataGenerator generator;
+
+    @Autowired
+    private MeterRegistry meterRegistry;
 
     @TempDir
     Path inbox;
@@ -162,11 +167,13 @@ class IngestStatementJobTest {
     @Test
     void wrongTrailerTotalsRejectTheFileBeforeAnyLineIsLoaded() throws Exception {
         Path file = copyFixture("statement_wrong_trailer.csv");
+        double rejectedBefore = meterRegistry.get(ReconMetrics.FILES_REJECTED).counter().count();
 
         JobExecution execution = ingest(jobOperatorTestUtils, file);
 
         assertThat(execution.getStatus()).isEqualTo(BatchStatus.COMPLETED);
         assertThat(execution.getExitStatus().getExitCode()).isEqualTo(IngestJobKeys.EXIT_REJECTED);
+        assertThat(meterRegistry.get(ReconMetrics.FILES_REJECTED).counter().count()).isEqualTo(rejectedBefore + 1);
         assertThat(execution.getStepExecutions()).extracting(StepExecution::getStepName)
                 .containsExactly(IngestJobKeys.CHECKSUM_STEP, IngestJobKeys.VALIDATE_STEP);
 

@@ -1,6 +1,8 @@
 package com.darshan.recon.matching;
 
+import com.darshan.recon.common.observability.ReconMetrics;
 import com.darshan.recon.ingest.StatementFileRepository;
+import com.darshan.recon.report.RunSummary;
 import java.time.Clock;
 import java.time.OffsetDateTime;
 import org.slf4j.Logger;
@@ -22,16 +24,19 @@ public class FinaliseReconRunTasklet implements Tasklet {
     private final ReconWindow window;
     private final ReconRunRepository reconRuns;
     private final StatementFileRepository statementFiles;
+    private final ReconMetrics metrics;
     private final Clock clock;
 
     public FinaliseReconRunTasklet(long reconRunId, long statementFileId, String accountNumber, ReconWindow window,
-                                   ReconRunRepository reconRuns, StatementFileRepository statementFiles, Clock clock) {
+                                   ReconRunRepository reconRuns, StatementFileRepository statementFiles,
+                                   ReconMetrics metrics, Clock clock) {
         this.reconRunId = reconRunId;
         this.statementFileId = statementFileId;
         this.accountNumber = accountNumber;
         this.window = window;
         this.reconRuns = reconRuns;
         this.statementFiles = statementFiles;
+        this.metrics = metrics;
         this.clock = clock;
     }
 
@@ -46,6 +51,7 @@ public class FinaliseReconRunTasklet implements Tasklet {
         }
         reconRuns.complete(reconRunId, matched, breaks, OffsetDateTime.now(clock));
         statementFiles.markReconciled(statementFileId);
+        metrics.runCompleted(RunSummary.matchRate(matched, breaks));
         log.info("recon_run {} completed for statement_file {}: candidates={} matched={} breaks={}",
                 reconRunId, statementFileId, candidates, matched, breaks);
         return RepeatStatus.FINISHED;
