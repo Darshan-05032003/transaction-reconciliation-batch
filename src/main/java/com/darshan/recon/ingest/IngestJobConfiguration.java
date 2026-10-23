@@ -2,6 +2,7 @@ package com.darshan.recon.ingest;
 
 import com.darshan.recon.common.batch.AnalyzeTableTasklet;
 import com.darshan.recon.common.config.ReconProperties;
+import com.darshan.recon.common.observability.ReconMetrics;
 import com.darshan.recon.ingest.file.MalformedRecordException;
 import com.darshan.recon.ingest.file.StatementFileValidator;
 import com.darshan.recon.ingest.file.StatementRecordFormat;
@@ -107,8 +108,8 @@ public class IngestJobConfiguration {
     public ValidateFileTasklet validateFileTasklet(@Value("#{jobParameters['filePath']}") String filePath,
                                                    @Value("#{jobExecutionContext['statementFileId']}") Long statementFileId,
                                                    StatementFileValidator validator,
-                                                   StatementFileRepository statementFiles) {
-        return new ValidateFileTasklet(Path.of(filePath), statementFileId, validator, statementFiles);
+                                                   StatementFileRepository statementFiles, ReconMetrics metrics) {
+        return new ValidateFileTasklet(Path.of(filePath), statementFileId, validator, statementFiles, metrics);
     }
 
     @Bean

@@ -17,10 +17,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.darshan.recon.TestcontainersConfiguration;
 import com.darshan.recon.common.config.ReconProperties;
+import com.darshan.recon.common.observability.ReconMetrics;
+import com.darshan.recon.report.RunSummary;
 import com.darshan.recon.testdata.GenerationManifest;
 import com.darshan.recon.testdata.GenerationManifest.ExpectedBreaks;
 import com.darshan.recon.testdata.GenerationRequest;
 import com.darshan.recon.testdata.TestDataGenerator;
+import io.micrometer.core.instrument.MeterRegistry;
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -79,6 +83,9 @@ class ReconcileJobTest {
     @Autowired
     private TestDataGenerator generator;
 
+    @Autowired
+    private MeterRegistry meterRegistry;
+
     @TempDir
     Path inbox;
 
@@ -95,6 +102,8 @@ class ReconcileJobTest {
     void generatedFileReconcilesToExactlyTheManifest() throws Exception {
         GenerationManifest manifest = generator.generate(new GenerationRequest(DATE, 1000, 1234L), inbox);
         long fileId = ingestGenerated(manifest);
+        Map<ReconBreakType, Double> breaksCountedBefore = breakCounters();
+        double reconcileJobTimingsBefore = jobTimerCount();
 
         JobExecution execution = reconcile(jobOperatorTestUtils, reconcileJob, reconcileParameters(fileId));
 
@@ -137,6 +146,24 @@ class ReconcileJobTest {
                 .isNotEmpty()
                 .allMatch(details -> details.contains("within tolerance of 3 day(s): warning"));
         assertThat(jdbcTemplate.queryForObject("select count(*) from recon_break where status <> 'OPEN'", Integer.class)).isZero();
+
+        Map<ReconBreakType, Double> breaksCountedAfter = breakCounters();
+        assertThat(breaksCountedAfter.get(ReconBreakType.AMOUNT_MISMATCH) - breaksCountedBefore.get(ReconBreakType.AMOUNT_MISMATCH))
+                .isEqualTo(expected.amountMismatch());
+        assertThat(breaksCountedAfter.get(ReconBreakType.VALUE_DATE_MISMATCH) - breaksCountedBefore.get(ReconBreakType.VALUE_DATE_MISMATCH))
+                .isEqualTo(expected.valueDateMismatch());
+        assertThat(breaksCountedAfter.get(ReconBreakType.MISSING_IN_BANK) - breaksCountedBefore.get(ReconBreakType.MISSING_IN_BANK))
+                .isEqualTo(expected.missingInBank());
+        assertThat(breaksCountedAfter.get(ReconBreakType.MISSING_IN_LEDGER) - breaksCountedBefore.get(ReconBreakType.MISSING_IN_LEDGER))
+                .isEqualTo(expected.missingInLedger());
+        assertThat(breaksCountedAfter.get(ReconBreakType.DUPLICATE_IN_STATEMENT) - breaksCountedBefore.get(ReconBreakType.DUPLICATE_IN_STATEMENT))
+                .isEqualTo(expected.duplicateInStatement());
+        assertThat(BigDecimal.valueOf(meterRegistry.get(ReconMetrics.MATCH_RATE).gauge().value()))
+                .isEqualByComparingTo(RunSummary.matchRate(manifest.expectedMatched(), expectedBreakTotal));
+        assertThat(jobTimerCount()).isEqualTo(reconcileJobTimingsBefore + 1);
+        assertThat(meterRegistry.get("spring.batch.step")
+                .tag("spring.batch.step.name", ReconcileJobKeys.PARTITION_STEP + ":partition0").timer().count())
+                .isPositive();
     }
 
     @Test
@@ -229,6 +256,20 @@ class ReconcileJobTest {
                 join batch_job_instance i on i.job_instance_id = e.job_instance_id
                 where i.job_name = 'reconcileJob'
                 """, Integer.class)).isZero();
+    }
+
+    private Map<ReconBreakType, Double> breakCounters() {
+        Map<ReconBreakType, Double> counts = new java.util.EnumMap<>(ReconBreakType.class);
+        for (ReconBreakType type : ReconBreakType.values()) {
+            counts.put(type, meterRegistry.get(ReconMetrics.BREAKS).tag(ReconMetrics.TYPE_TAG, type.name()).counter().count());
+        }
+        return counts;
+    }
+
+    // Spring Batch's own observation, turned into a timer by Boot's observation handler.
+    private double jobTimerCount() {
+        return meterRegistry.find("spring.batch.job").tag("spring.batch.job.name", ReconcileJobKeys.JOB_NAME).timers()
+                .stream().mapToDouble(timer -> timer.count()).sum();
     }
 
     private long ingestGenerated(GenerationManifest manifest) throws Exception {
