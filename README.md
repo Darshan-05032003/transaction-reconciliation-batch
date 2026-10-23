@@ -57,7 +57,7 @@ docker compose exec app cat data/reports/recon_2026-10-01_1_summary.csv
 4. `run_recon.sh` ingests the file through the API, waits, reconciles it, waits again and prints the run summary: 939 matched, 71 breaks for this seed, which equals the generator's manifest.
 5. The summary and the break report are CSV files in the reports folder of the data volume; the same numbers are at `GET /api/v1/recon-runs/1/summary`.
 
-Then resolve a break as an operator (`PATCH /api/v1/breaks/{id}/resolve`, see the API section), and stop everything with `docker compose down -v`.
+Then list the breaks of the run (`GET /api/v1/recon-runs/1/breaks` as any user), resolve one as an operator (`PATCH /api/v1/breaks/{id}/resolve`, see the API section), and stop everything with `docker compose down -v`.
 
 To run the application on the host instead (for development): `docker compose up -d --wait postgres`, `set -a; source .env; set +a`, `./mvnw spring-boot:run`; the scripts then work against `http://localhost:8083` and `scripts/generate_data.sh -d 2026-10-01 -n 1000 -s 42` writes into `data/inbox/` on the host.
 
@@ -105,17 +105,18 @@ Next to the file the generator writes `<file>.manifest.json` with the exact coun
 
 ## Ingesting a statement file
 
-`ingestStatementJob` takes one job parameter, `filePath`, and runs three steps:
+`ingestStatementJob` takes one job parameter, `filePath`, and runs four steps:
 
 1. `computeChecksum` streams the file through SHA-256. If a `statement_file` row with that checksum already exists, the job ends with exit status `DUPLICATE` and changes nothing. Otherwise a row with status `RECEIVED` is inserted.
 2. `validateControlTotals` reads the file once, parses the header and the trailer and recomputes the control totals from the data records. On a mismatch the file is marked `REJECTED` with the reason, the job ends with exit status `REJECTED` and nothing is loaded. Otherwise the header fields and the declared count and total are stored on the `statement_file` row.
 3. `loadStatementLines` reads the data records in chunks of `RECON_CHUNK_SIZE`, parses and validates each one (required fields, decimal amount, ISO date, three-letter currency) and inserts them into `statement_line` with JDBC batches, one transaction per chunk. Records that cannot be parsed are skipped and appended to `data/error/<file>.errors.csv` with their line number, the reason and the raw line, up to `RECON_SKIP_LIMIT` per run; one more bad record fails the job and the file is marked `FAILED` with the reason. Transient database errors are retried three times.
+4. `analyzeStatementLines` runs `ANALYZE statement_line`, so that the reconcile job, which usually starts seconds later, is planned on fresh statistics instead of waiting for autovacuum (see the Performance section).
 
 When the job completes, the file is marked `VALIDATED` and one summary line is logged with the declared, read, written and skipped counts and the duration. A failed execution can be restarted and resumes after the last committed chunk. Launching the same `filePath` again is refused because that job instance already completed; the same content under another name ends with `DUPLICATE`. Nothing runs at boot (`spring.batch.job.enabled=false`); the job is started through the `JobOperator`.
 
 ## Reconciling a statement file
 
-`reconcileJob` takes the job parameter `statementFileId` (a file in status `VALIDATED`) and runs three steps:
+`reconcileJob` takes the job parameter `statementFileId` (a file in status `VALIDATED`) and runs five steps:
 
 1. `createReconRun` inserts a `recon_run` row linked to the job execution and derives the ledger window: all ledger transactions of the statement's account whose value date lies within `RECON_DATE_TOLERANCE_DAYS` of the statement date.
 2. `matchCandidates` is a partitioned step. The candidate pairs are built in SQL with a `FULL OUTER JOIN` between the statement lines of the file and the ledger transactions of the window on the normalised reference (trimmed, internal whitespace collapsed, upper-cased). A reference that appears more than once in the statement is collapsed to one candidate row that carries every line number. The rows are split into partitions by a hash of the normalised reference, so both sides of a pair always land in the same partition; each partition streams its rows through a `JdbcCursorItemReader`, classifies them with the matching rules and writes breaks to `recon_break` with JDBC batches, one transaction per chunk. The number of partitions defaults to `RECON_GRID_SIZE`, which is also the size of the thread pool, and can be overridden per run with the non-identifying parameter `gridSize`.
@@ -254,6 +255,38 @@ All scripts in `scripts/` use `set -euo pipefail`, `getopts`, a `usage()` (`-h`)
 The poller already picks up files on its own; cron is for the surrounding chores and for shops that prefer an explicit nightly run over polling. Percent signs must be escaped in a crontab.
 
 ```crontab
+# minute hour day month weekday  command
+*/5  *  *  *  *   cd /opt/recon && scripts/check_health.sh >/dev/null 2>&1 || logger -t recon "health check failed"
+30   1  *  *  *   cd /opt/recon && . /etc/recon/api.env && scripts/run_recon.sh -f "statement_BANK01_607867200891_$(date +\%F).csv" -b 500 >/dev/null 2>&1
+0    3  *  *  *   cd /opt/recon && scripts/archive_old.sh -d 30 >/dev/null 2>&1
+```
+
+`/etc/recon/api.env` exports `RECON_API_URL`, `RECON_API_USER` and `RECON_API_PASSWORD` and is readable by the cron user only. The scripts' own log files under `logs/` keep the details; the redirects keep cron mail quiet. Run either the poller or the nightly `run_recon.sh` line for a given inbox, not both: the script does not move files, so the poller would pick the same file up later and move it to `data/failed/` as a `DUPLICATE`.
+
+### Restarting a failed execution
+
+A failed execution keeps every chunk that was committed. `POST /api/v1/jobs/executions/{id}/restart` creates a new execution of the same job instance that skips the completed steps and resumes the failed ones after their last commit; for the partitioned matching step only the partitions that did not complete run again, each from its own saved position, and the run keeps its id. The execution id is in the `.reason` file, in the script log and in `batch_job_execution`.
+
+```bash
+curl -u operator -X POST localhost:8083/api/v1/jobs/executions/42/restart
+curl -u viewer localhost:8083/api/v1/jobs/executions/43
+```
+
+A failed `ingestStatementJob` reads the file again from the path it was launched with, so move the file from `data/failed/` back to the inbox before restarting; the poller leaves it alone for one poll interval, which is the window to issue the restart. A failed `reconcileJob` does not need the file.
+
+### Troubleshooting a failed nightly run
+
+1. Is the application up? `scripts/check_health.sh`; if not, check the database (`docker compose ps`, `docker compose logs postgres`) and the application log.
+2. Is the file still in `data/inbox/`? Then it was never picked up: it does not end in `.csv`, it is still changing size, it is not readable by the application user, or polling is disabled (`RECON_POLL_CRON=-`). The application log says `Inbox poll handled n file(s)` on every poll that found something.
+3. Is it in `data/failed/`? Read `<file>.reason`:
+   - `REJECTED`: the trailer does not match the data records; ask the counterparty for a corrected file. Nothing was loaded.
+   - `DUPLICATE`: the content was already processed as the `statement_file` named in the reason; nothing to do unless the earlier run itself failed.
+   - `FAILED` during ingest with `Skip limit of 'n' exceeded`: more malformed lines than `RECON_SKIP_LIMIT`; the skipped lines and reasons are in `data/error/<file>.errors.csv`. Fix the file or the limit, then move the file back and restart, or re-send a corrected file.
+   - `FAILED` for any other reason (database unavailable, disk full): fix the cause and restart the execution as described above; no data is duplicated by a restart.
+4. Is it in `data/archive/<date>/`? Then both jobs completed; look at the run with `GET /api/v1/recon-runs/{id}/summary` and the report in `data/reports/`. A high break count usually means the ledger for that day was not posted yet or the wrong date window; the breaks list which side is missing.
+5. `run_recon.sh` exit codes tell the same story without reading files: 7 duplicate, 8 rejected, 5 a job failed (the log shows the restart command), 6 the job did not finish in time (it is still running; poll the execution), 9 the run completed but has more breaks than allowed.
+6. `AtomicMoveNotSupportedException` in the log means the inbox and the archive or failed folder are on different file systems; keep `data/` on one volume.
+7. The application refuses to start with a message naming `DB_POOL_SIZE` and `RECON_GRID_SIZE` when the connection pool is smaller than `2 * RECON_GRID_SIZE + 2`; raise the pool or lower the grid size.
 
 ### Running in Docker
 
